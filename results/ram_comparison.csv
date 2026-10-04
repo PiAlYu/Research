@@ -1,0 +1,73 @@
+implementation,profile,threads,kernel,best_gbps
+Моя,p1,1,Copy,19.738
+Моя,p1,1,Scale,18.435
+Моя,p1,1,Add,21.516
+Моя,p1,1,Triad,21.657
+Моя,e1,1,Copy,12.684
+Моя,e1,1,Scale,17.432
+Моя,e1,1,Add,19.836
+Моя,e1,1,Triad,19.826
+Моя,p2,2,Copy,23.965
+Моя,p2,2,Scale,20.403
+Моя,p2,2,Add,23.599
+Моя,p2,2,Triad,23.718
+Моя,p4,4,Copy,27.492
+Моя,p4,4,Scale,27.868
+Моя,p4,4,Add,28.341
+Моя,p4,4,Triad,29.900
+Моя,p6,6,Copy,29.260
+Моя,p6,6,Scale,29.464
+Моя,p6,6,Add,29.016
+Моя,p6,6,Triad,30.436
+Моя,e8,8,Copy,26.795
+Моя,e8,8,Scale,19.931
+Моя,e8,8,Add,22.402
+Моя,e8,8,Triad,22.501
+Моя,physical14,14,Copy,28.877
+Моя,physical14,14,Scale,24.529
+Моя,physical14,14,Add,26.298
+Моя,physical14,14,Triad,24.660
+Моя,p12_smt,12,Copy,28.460
+Моя,p12_smt,12,Scale,27.433
+Моя,p12_smt,12,Add,29.413
+Моя,p12_smt,12,Triad,28.963
+Моя,logical20,20,Copy,28.142
+Моя,logical20,20,Scale,24.565
+Моя,logical20,20,Add,25.599
+Моя,logical20,20,Triad,25.347
+STREAM 5.10,p1,1,Copy,25.986
+STREAM 5.10,p1,1,Scale,18.346
+STREAM 5.10,p1,1,Add,21.523
+STREAM 5.10,p1,1,Triad,21.687
+STREAM 5.10,e1,1,Copy,17.119
+STREAM 5.10,e1,1,Scale,17.416
+STREAM 5.10,e1,1,Add,19.827
+STREAM 5.10,e1,1,Triad,19.888
+STREAM 5.10,p2,2,Copy,29.737
+STREAM 5.10,p2,2,Scale,20.291
+STREAM 5.10,p2,2,Add,23.598
+STREAM 5.10,p2,2,Triad,23.479
+STREAM 5.10,p4,4,Copy,30.541
+STREAM 5.10,p4,4,Scale,29.643
+STREAM 5.10,p4,4,Add,30.309
+STREAM 5.10,p4,4,Triad,30.047
+STREAM 5.10,p6,6,Copy,30.59
+STREAM 5.10,p6,6,Scale,30.485
+STREAM 5.10,p6,6,Add,30.477
+STREAM 5.10,p6,6,Triad,30.185
+STREAM 5.10,e8,8,Copy,29.556
+STREAM 5.10,e8,8,Scale,20.177
+STREAM 5.10,e8,8,Add,22.626
+STREAM 5.10,e8,8,Triad,22.583
+STREAM 5.10,physical14,14,Copy,30.16
+STREAM 5.10,physical14,14,Scale,25.386
+STREAM 5.10,physical14,14,Add,25.688
+STREAM 5.10,physical14,14,Triad,26.237
+STREAM 5.10,p12_smt,12,Copy,30.227
+STREAM 5.10,p12_smt,12,Scale,29.461
+STREAM 5.10,p12_smt,12,Add,29.318
+STREAM 5.10,p12_smt,12,Triad,29.48
+STREAM 5.10,logical20,20,Copy,29.292
+STREAM 5.10,logical20,20,Scale,24.614
+STREAM 5.10,logical20,20,Add,25.463
+STREAM 5.10,logical20,20,Triad,25.138
