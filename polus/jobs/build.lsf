@@ -1,0 +1,8 @@
+#BSUB -J stream_build
+#BSUB -q short
+#BSUB -W 00:05
+#BSUB -o logs/build.%J.out
+#BSUB -e logs/build.%J.err
+
+cd "$LS_SUBCWD"
+python3 run.py build

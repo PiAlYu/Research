@@ -1,0 +1,12 @@
+#BSUB -J stream_all_20c
+#BSUB -q normal
+#BSUB -W 01:00
+#BSUB -R "span[hosts=1]"
+#BSUB -R "affinity[core(20)]"
+#BSUB -o logs/all_20c.%J.out
+#BSUB -e logs/all_20c.%J.err
+
+cd "$LS_SUBCWD"
+export OMP_NUM_THREADS=40
+export OMP_PROC_BIND=true
+/polusfs/lsf/openmp/launchOpenMP.py ./jobs/run_all_20cores.sh
