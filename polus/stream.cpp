@@ -4,65 +4,75 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
 #include <omp.h>
+#include <sched.h>
 
 using Clock = std::chrono::steady_clock;
 
 const double TARGET_SECONDS = 2.0;
-int thread_count = 1;
+std::vector<int> thread_cpus;
 
-// Копирует один массив в другой обычным циклом.
-void copy_array(double* __restrict__ c, const double* __restrict__ a, long long n) {
-    for (long long i = 0; i < n; i++) c[i] = a[i];
+// Закрепляет текущий поток за выбранным логическим процессором.
+void bind_thread() {
+    int thread = omp_get_thread_num();
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(thread_cpus[thread], &set);
+    sched_setaffinity(0, sizeof(set), &set);
+}
+
+// Читает переданный Python список логических процессоров.
+void read_cpus(const char* text) {
+    std::stringstream input(text);
+    std::string value;
+    while (std::getline(input, value, ','))
+        thread_cpus.push_back(std::atoi(value.c_str()));
 }
 
 // Выполняет одну из четырёх операций STREAM.
-void stream_kernel(int kernel, double* a, double* b, double* c, long long n) {
-    if (thread_count == 1) {
-        if (kernel == 0) copy_array(c, a, n);
-        if (kernel == 1)
-            for (long long i = 0; i < n; i++) b[i] = 3.0 * c[i];
-        if (kernel == 2)
-            for (long long i = 0; i < n; i++) c[i] = a[i] + b[i];
-        if (kernel == 3)
-            for (long long i = 0; i < n; i++) a[i] = b[i] + 3.0 * c[i];
-        return;
-    }
+void stream_kernel(int kernel, double* a, double* b, double* c, long long n, int repeats) {
+#pragma omp parallel
+    {
+        bind_thread();
+        int thread = omp_get_thread_num();
+        int threads = omp_get_num_threads();
+        long long blocks = (n + 15) / 16;
+        long long begin = std::min(n, blocks * thread / threads * 16);
+        long long end = std::min(n, blocks * (thread + 1) / threads * 16);
 
-    if (kernel == 0) {
-#pragma omp parallel for schedule(static)
-        for (long long i = 0; i < n; i++) c[i] = a[i];
-    }
-    if (kernel == 1) {
-#pragma omp parallel for schedule(static)
-        for (long long i = 0; i < n; i++) b[i] = 3.0 * c[i];
-    }
-    if (kernel == 2) {
-#pragma omp parallel for schedule(static)
-        for (long long i = 0; i < n; i++) c[i] = a[i] + b[i];
-    }
-    if (kernel == 3) {
-#pragma omp parallel for schedule(static)
-        for (long long i = 0; i < n; i++) a[i] = b[i] + 3.0 * c[i];
+        for (int repeat = 0; repeat < repeats; repeat++) {
+            if (kernel == 0) {
+                for (long long i = begin; i < end; i++) c[i] = a[i];
+            }
+            if (kernel == 1) {
+                for (long long i = begin; i < end; i++) b[i] = 3.0 * c[i];
+            }
+            if (kernel == 2) {
+                for (long long i = begin; i < end; i++) c[i] = a[i] + b[i];
+            }
+            if (kernel == 3) {
+                for (long long i = begin; i < end; i++) a[i] = b[i] + 3.0 * c[i];
+            }
+        }
     }
 }
 
-// Измеряет операцию не меньше 2 секунд.
+// Измеряет операцию.
 void measure(int kernel, double* a, double* b, double* c, long long n,
              int repeats, int min_samples, int bytes, int& samples,
              double& total, double& median_time, double& best_time,
              double& median, double& best) {
-    stream_kernel(kernel, a, b, c, n);
+    stream_kernel(kernel, a, b, c, n, 1);
     std::vector<double> rates;
     std::vector<double> times;
     total = 0.0;
 
     while ((int)rates.size() < min_samples || total < TARGET_SECONDS) {
         Clock::time_point start = Clock::now();
-        for (int repeat = 0; repeat < repeats; repeat++)
-            stream_kernel(kernel, a, b, c, n);
+        stream_kernel(kernel, a, b, c, n, repeats);
         Clock::time_point finish = Clock::now();
 
         double seconds = std::chrono::duration<double>(finish - start).count();
@@ -91,10 +101,9 @@ int main(int argc, char* argv[]) {
     int threads = std::atoi(argv[2]);
     int min_samples = std::atoi(argv[3]);
     int repeats = std::atoi(argv[4]);
-
+    read_cpus(argv[5]);
     omp_set_dynamic(0);
     omp_set_num_threads(threads);
-    thread_count = threads;
 
     double* a;
     double* b;
@@ -103,11 +112,19 @@ int main(int argc, char* argv[]) {
     posix_memalign((void**)&b, 128, n * sizeof(double));
     posix_memalign((void**)&c, 128, n * sizeof(double));
 
-#pragma omp parallel for schedule(static)
-    for (long long i = 0; i < n; i++) {
-        a[i] = 1.0;
-        b[i] = 2.0;
-        c[i] = 0.0;
+#pragma omp parallel
+    {
+        bind_thread();
+        int thread = omp_get_thread_num();
+        int threads = omp_get_num_threads();
+        long long blocks = (n + 15) / 16;
+        long long begin = std::min(n, blocks * thread / threads * 16);
+        long long end = std::min(n, blocks * (thread + 1) / threads * 16);
+        for (long long i = begin; i < end; i++) {
+            a[i] = 1.0;
+            b[i] = 2.0;
+            c[i] = 0.0;
+        }
     }
 
     const char* names[4] = {"Copy", "Scale", "Add", "Triad"};
@@ -131,8 +148,7 @@ int main(int argc, char* argv[]) {
                  "median_gbps,best_gbps\n";
     std::cout << std::fixed << std::setprecision(6);
     for (int kernel = 0; kernel < 4; kernel++) {
-        double data_gb = (double)bytes[kernel] * n * repeats * samples[kernel]
-                         / 1000000000.0;
+        double data_gb = (double)bytes[kernel] * n * repeats * samples[kernel] / 1000000000.0;
         std::cout << names[kernel] << ',' << n << ',' << threads << ','
                   << bytes[kernel] << ',' << repeats << ',' << samples[kernel]
                   << ',' << data_gb << ',' << total[kernel] << ','

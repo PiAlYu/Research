@@ -7,53 +7,82 @@
 #include <iostream>
 #include <vector>
 
+#include <immintrin.h>
 #include <omp.h>
 #include <windows.h>
 
 using Clock = std::chrono::steady_clock;
 
 const double TARGET_SECONDS = 2.0;
-int thread_count = 1;
+const int STREAMING_STORE_N = 4194304;
 
-// Копирует элементы из массива a в массив c обычным циклом.
-void copy_array(double* __restrict c, const double* __restrict a, int n) {
-    if (thread_count == 1) {
-        for (int i = 0; i < n; i++) c[i] = a[i];
-        return;
+// Копирует по 16 чисел за шаг с помощью AVX2.
+void copy_array(double* __restrict c, const double* __restrict a, int n, int repeats) {
+    int limit = n - n % 16;
+    bool streaming = n >= STREAMING_STORE_N;
+
+#pragma omp parallel
+    {
+        int thread = omp_get_thread_num();
+        int threads = omp_get_num_threads();
+        int blocks = limit / 16;
+        int begin = blocks * thread / threads * 16;
+        int end = blocks * (thread + 1) / threads * 16;
+
+        for (int repeat = 0; repeat < repeats; repeat++) {
+            for (int i = begin; i < end; i += 16) {
+                __m256d x0 = _mm256_loadu_pd(a + i);
+                __m256d x1 = _mm256_loadu_pd(a + i + 4);
+                __m256d x2 = _mm256_loadu_pd(a + i + 8);
+                __m256d x3 = _mm256_loadu_pd(a + i + 12);
+
+                if (streaming) {
+                    _mm256_stream_pd(c + i, x0);
+                    _mm256_stream_pd(c + i + 4, x1);
+                    _mm256_stream_pd(c + i + 8, x2);
+                    _mm256_stream_pd(c + i + 12, x3);
+                } else {
+                    _mm256_store_pd(c + i, x0);
+                    _mm256_store_pd(c + i + 4, x1);
+                    _mm256_store_pd(c + i + 8, x2);
+                    _mm256_store_pd(c + i + 12, x3);
+                }
+            }
+            if (thread == 0)
+                for (int i = limit; i < n; i++) c[i] = a[i];
+            if (streaming) _mm_sfence();
+        }
     }
-
-#pragma omp parallel for
-    for (int i = 0; i < n; i++) c[i] = a[i];
 }
 
 // Выполняет одну из четырёх операций STREAM.
-void stream_kernel(int kernel, double* a, double* b, double* c, int n) {
+void stream_kernel(int kernel, double* a, double* b, double* c, int n, int repeats) {
     if (kernel == 0) {
-        copy_array(c, a, n);
+        copy_array(c, a, n, repeats);
         return;
     }
 
-    if (thread_count == 1) {
-        if (kernel == 1)
-            for (int i = 0; i < n; i++) b[i] = 3.0 * c[i];
-        if (kernel == 2)
-            for (int i = 0; i < n; i++) c[i] = a[i] + b[i];
-        if (kernel == 3)
-            for (int i = 0; i < n; i++) a[i] = b[i] + 3.0 * c[i];
-        return;
-    }
+#pragma omp parallel
+    {
+        int thread = omp_get_thread_num();
+        int threads = omp_get_num_threads();
+        int blocks = (n + 7) / 8;
+        int begin = blocks * thread / threads * 8;
+        int end = blocks * (thread + 1) / threads * 8;
+        if (begin > n) begin = n;
+        if (end > n) end = n;
 
-    if (kernel == 1) {
-#pragma omp parallel for
-        for (int i = 0; i < n; i++) b[i] = 3.0 * c[i];
-    }
-    if (kernel == 2) {
-#pragma omp parallel for
-        for (int i = 0; i < n; i++) c[i] = a[i] + b[i];
-    }
-    if (kernel == 3) {
-#pragma omp parallel for
-        for (int i = 0; i < n; i++) a[i] = b[i] + 3.0 * c[i];
+        for (int repeat = 0; repeat < repeats; repeat++) {
+            if (kernel == 1) {
+                for (int i = begin; i < end; i++) b[i] = 3.0 * c[i];
+            }
+            if (kernel == 2) {
+                for (int i = begin; i < end; i++) c[i] = a[i] + b[i];
+            }
+            if (kernel == 3) {
+                for (int i = begin; i < end; i++) a[i] = b[i] + 3.0 * c[i];
+            }
+        }
     }
 }
 
@@ -62,7 +91,7 @@ void measure(int kernel, double* a, double* b, double* c, int n,
              int repeats, int min_samples, int bytes, int& samples,
              double& total, double& median_time, double& best_time,
              double& median, double& best) {
-    stream_kernel(kernel, a, b, c, n);
+    stream_kernel(kernel, a, b, c, n, 1);
     std::vector<double> rates;
     std::vector<double> times;
     total = 0.0;
@@ -70,8 +99,7 @@ void measure(int kernel, double* a, double* b, double* c, int n,
     while ((int)rates.size() < min_samples || total < TARGET_SECONDS) {
         auto start = Clock::now();
 
-        for (int repeat = 0; repeat < repeats; repeat++)
-            stream_kernel(kernel, a, b, c, n);
+        stream_kernel(kernel, a, b, c, n, repeats);
 
         auto finish = Clock::now();
         double seconds = std::chrono::duration<double>(finish - start).count();
@@ -105,7 +133,6 @@ int main(int argc, char* argv[]) {
     omp_set_dynamic(0);
     omp_set_num_threads(threads);
     SetProcessAffinityMask(GetCurrentProcess(), (DWORD_PTR)mask);
-    thread_count = threads;
 
     size_t stride = ((size_t)n + 7) / 8 * 8 + 8;
     std::vector<double> memory(3 * stride + 8);

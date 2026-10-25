@@ -1,0 +1,10 @@
+#BSUB -J stream_frequency
+#BSUB -q short
+#BSUB -W 00:05
+#BSUB -n 20
+#BSUB -R "span[hosts=1]"
+#BSUB -o logs/frequency.%J.out
+#BSUB -e logs/frequency.%J.err
+
+cd "$LS_SUBCWD"
+./jobs/run_frequency_check.sh

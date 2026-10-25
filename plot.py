@@ -37,19 +37,56 @@ CACHE_LIMITS = {
     ],
 }
 
+CACHE_ZONES = {
+    "P": [
+        (2048, 3072, "L1 = 48 КиБ"),
+        (54613, 81920, "L2 = 1 280 КиБ"),
+        (1048576, 1572864, "L3 = 24 МиБ"),
+    ],
+    "E": [
+        (1365, 2048, "L1 = 32 КиБ"),
+        (87381, 131072, "L2 = 2 МиБ"),
+        (1048576, 1572864, "L3 = 24 МиБ"),
+    ],
+}
+
 
 # Показывает границы кэшей для трёх массивов double.
-def add_cache_limits(axis, core, only_l3=False):
+def add_cache_limits(axis, core, only_l3=False, arrays=3):
     limits = CACHE_LIMITS[core]
     if only_l3:
         limits = limits[-1:]
     for position, label in limits:
+        if arrays == 2:
+            position = round(position * 1.5)
+            label = "{}\nN ≈ {:,}".format(
+                label.split("\n")[0], position).replace(",", " ")
         axis.axvline(position, color="gray", linestyle="--",
                      linewidth=1, alpha=0.8)
         axis.annotate(label, xy=(position, 0),
                       xycoords=("data", "axes fraction"),
                       xytext=(3, 4), textcoords="offset points",
                       rotation=90, ha="left", va="bottom",
+                      fontsize=7, color="dimgray")
+
+
+# Показывает диапазон границы: слева три массива, справа два массива.
+def add_cache_zones(axis, core, only_l3=False):
+    zones = CACHE_ZONES[core]
+    if only_l3:
+        zones = zones[-1:]
+    for left, right, label in zones:
+        axis.axvspan(left, right, color="gray", alpha=0.13)
+        axis.axvline(left, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
+        axis.axvline(right, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
+        middle = (left * right) ** 0.5
+        text = "{}\nN: {:,}–{:,}".format(label, left, right).replace(",", " ")
+        axis.annotate(text, xy=(middle, 0),
+                      xycoords=("data", "axes fraction"),
+                      xytext=(0, 4), textcoords="offset points",
+                      rotation=90, ha="center", va="bottom",
                       fontsize=7, color="dimgray")
 
 
@@ -70,7 +107,7 @@ def plot_cache(rows, title, filename):
                       [float(row["median_gbps"]) for row in points],
                       marker="o", markersize=3, label=kernel)
         axis.set_xscale("log", base=2)
-        add_cache_limits(axis, core)
+        add_cache_zones(axis, core)
         axis.set_ylabel("ГБ/с")
         axis.set_title(f"{core}-ядро, один поток")
         axis.grid(True, alpha=0.25)
@@ -94,7 +131,7 @@ def plot_cache_zoom(rows, title, filename):
                       [float(row["median_gbps"]) for row in points],
                       marker="o", markersize=4, label=kernel)
         axis.set_xscale("log", base=2)
-        add_cache_limits(axis, core, only_l3=True)
+        add_cache_zones(axis, core, only_l3=True)
         axis.set_ylabel("ГБ/с")
         axis.set_title(f"{core}-ядро, один поток")
         axis.grid(True, alpha=0.25)
@@ -118,7 +155,8 @@ def plot_all_profiles(rows, title, filename):
                       [float(row["median_gbps"]) for row in points],
                       marker="o", markersize=2, linewidth=1.2, label=label)
         axis.set_xscale("log", base=2)
-        add_cache_limits(axis, "P", only_l3=True)
+        arrays = 2 if kernel in ("Copy", "Scale") else 3
+        add_cache_limits(axis, "P", only_l3=True, arrays=arrays)
         axis.set_title(kernel)
         axis.set_ylabel("ГБ/с")
         axis.grid(True, alpha=0.25)
@@ -200,6 +238,44 @@ def plot_comparison(my_rows, official_rows):
     plt.close(figure)
 
 
+# Строит сравнение моей реализации и STREAM для одного P- и E-ядра Windows.
+def plot_windows_comparison(my_rows, official_rows):
+    RESULTS.mkdir(exist_ok=True)
+    figure, axes = plt.subplots(2, 2, figsize=(13, 8), sharex=True)
+
+    for axis, kernel in zip(axes.flat, KERNELS):
+        for core, color in (("P", "tab:blue"), ("E", "tab:orange")):
+            mine = [row for row in my_rows
+                    if row["core"] == core and row["kernel"] == kernel]
+            official = [row for row in official_rows
+                        if row["core"] == core and row["kernel"] == kernel]
+            mine.sort(key=lambda row: int(row["n"]))
+            official.sort(key=lambda row: int(row["n"]))
+
+            axis.plot([int(row["n"]) for row in mine],
+                      [float(row["median_gbps"]) for row in mine],
+                      color=color, marker="o", markersize=3,
+                      label="Моя, {}-ядро".format(core))
+            axis.plot([int(row["n"]) for row in official],
+                      [float(row["median_gbps"]) for row in official],
+                      color=color, linestyle="--", marker="o", markersize=3,
+                      label="STREAM 5.10, {}-ядро".format(core))
+
+        axis.set_xscale("log", base=2)
+        axis.set_title(kernel)
+        axis.set_ylabel("ГБ/с")
+        axis.grid(True, alpha=0.25)
+        axis.legend(fontsize=8)
+
+    for axis in axes[-1]:
+        axis.set_xlabel("Число элементов в каждом массиве")
+    figure.suptitle("Windows: моя реализация и официальный STREAM 5.10")
+    figure.tight_layout()
+    figure.savefig(RESULTS / "windows_stream_comparison.svg",
+                   metadata={"Date": None})
+    plt.close(figure)
+
+
 # Читает свежие CSV и строит все графики.
 def main():
     my_all = read_csv(MY_RESULTS, "all_results.csv")
@@ -224,6 +300,7 @@ def main():
     plot_ram(official_ram, "Скорость RAM: STREAM 5.10",
              OFFICIAL_RESULTS / "ram_scaling.svg", "best_gbps")
     plot_comparison(my_ram, official_ram)
+    plot_windows_comparison(my_cache, official_cache)
     print("Графики построены.")
 
 

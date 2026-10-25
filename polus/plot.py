@@ -18,6 +18,12 @@ CACHE_LIMITS = [
     (349525, "L3 = 8 МиБ\nN ≈ 349 525"),
 ]
 
+CACHE_ZONES = [
+    (2730, 4096, "L1 = 64 КиБ"),
+    (21845, 32768, "L2 = 512 КиБ"),
+    (349525, 524288, "L3 = 8 МиБ"),
+]
+
 
 # Показывает границы кэшей одного ядра POWER8.
 def add_cache_limits(axis):
@@ -31,14 +37,35 @@ def add_cache_limits(axis):
                       fontsize=8, color="dimgray")
 
 
+# Показывает диапазон границы: слева три массива, справа два массива.
+def add_cache_zones(axis):
+    for left, right, label in CACHE_ZONES:
+        axis.axvspan(left, right, color="gray", alpha=0.13)
+        axis.axvline(left, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
+        axis.axvline(right, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
+        middle = (left * right) ** 0.5
+        text = "{}\nN: {:,}–{:,}".format(label, left, right).replace(",", " ")
+        axis.annotate(text, xy=(middle, 0),
+                      xycoords=("data", "axes fraction"),
+                      xytext=(0, 4), textcoords="offset points",
+                      rotation=90, ha="center", va="bottom",
+                      fontsize=8, color="dimgray")
+
+
 # Показывает общий L3 для разного числа физических ядер.
-def add_shared_l3_limits(axis):
+def add_shared_l3_limits(axis, kernel):
     limits = [
         (349525, "L3 1 ядра = 8 МиБ\nN ≈ 349 525"),
         (3495253, "L3 10 ядер = 80 МиБ\nN ≈ 3 495 253"),
         (6990507, "L3 20 ядер = 160 МиБ\nN ≈ 6 990 507"),
     ]
     for position, label in limits:
+        if kernel in ("Copy", "Scale"):
+            position = round(position * 1.5)
+            label = "{}\nN ≈ {:,}".format(
+                label.split("\n")[0], position).replace(",", " ")
         axis.axvline(position, color="gray", linestyle="--",
                      linewidth=1, alpha=0.7)
         axis.annotate(label, xy=(position, 0),
@@ -69,7 +96,7 @@ def plot_all(rows):
                       [float(row["median_gbps"]) for row in points],
                       marker="o", markersize=3, label=profile)
         axis.set_xscale("log", base=2)
-        add_shared_l3_limits(axis)
+        add_shared_l3_limits(axis, kernel)
         axis.set_title(kernel)
         axis.set_ylabel("ГБ/с")
         axis.grid(True, alpha=0.25)
@@ -96,7 +123,7 @@ def plot_one_core(rows):
                   [float(row["median_gbps"]) for row in points],
                   marker="o", markersize=4, label=kernel)
     axis.set_xscale("log", base=2)
-    add_cache_limits(axis)
+    add_cache_zones(axis)
     axis.set_xlabel("Число элементов в каждом массиве")
     axis.set_ylabel("ГБ/с")
     axis.set_title("Polus POWER8: одно ядро, один поток, {} значений N".format(

@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#BSUB -J stream_aligned_build
+#BSUB -q short
+#BSUB -W 00:05
+#BSUB -n 1
+#BSUB -o logs/build.%J.out
+#BSUB -e logs/build.%J.err
+
+cd "$LS_SUBCWD"
+
+gcc --version | head -1
+
+gcc -O3 -fopenmp \
+    -mcpu=power8 -mtune=power8 \
+    -std=gnu99 \
+    -DSTREAM_ARRAY_SIZE=268435456 \
+    -DNTIMES=20 \
+    stream_5-10_posix_memalign.c \
+    -o stream_power8

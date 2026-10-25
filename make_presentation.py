@@ -9,43 +9,89 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 
 ROOT = Path(__file__).resolve().parent
-MY_RESULTS = ROOT / "my_stream" / "results"
-OFFICIAL_RESULTS = ROOT / "official_stream" / "results"
-PDF = ROOT / "STREAM_presentation.pdf"
+MY_WINDOWS = ROOT / "my_stream" / "results"
+OFFICIAL_WINDOWS = ROOT / "official_stream" / "results"
+MY_POLUS = ROOT / "polus" / "results"
+OFFICIAL_POLUS = ROOT / "polus_official" / "results"
+PDF = ROOT / "pres.pdf"
 
 KERNELS = ("Copy", "Scale", "Add", "Triad")
-PROFILES = [
+WINDOWS_PROFILES = (
     "p1", "e1", "p2", "p4", "p6", "e8",
     "physical14", "p12_smt", "logical20",
-]
-PROFILE_LABELS = [
+)
+WINDOWS_LABELS = (
     "1 P", "1 E", "2 P", "4 P", "6 P", "8 E",
     "Все физические", "P + SMT", "Все логические",
-]
+)
+POLUS_PROFILES = ("1core", "10cores", "20cores", "20cores_smt2")
+POLUS_LABELS = ("1 ядро", "10 ядер", "20 ядер", "20 ядер, SMT2")
+
+WINDOWS_CACHE_ZONES = {
+    "P": (
+        (2048, 3072, "L1 = 48 КиБ"),
+        (54613, 81920, "L2 = 1 280 КиБ"),
+        (1048576, 1572864, "L3 = 24 МиБ"),
+    ),
+    "E": (
+        (1365, 2048, "L1 = 32 КиБ"),
+        (87381, 131072, "L2 = 2 МиБ"),
+        (1048576, 1572864, "L3 = 24 МиБ"),
+    ),
+}
+POLUS_CACHE_ZONES = (
+    (2730, 4096, "L1 = 64 КиБ"),
+    (21845, 32768, "L2 = 512 КиБ"),
+    (349525, 524288, "L3 = 8 МиБ"),
+)
 
 
 # Читает строки из CSV-файла.
-def read_csv(folder, name):
-    with (folder / name).open(encoding="utf-8") as source:
+def read_csv(folder, name="all_results.csv"):
+    with (folder / name).open(encoding="utf-8-sig", newline="") as source:
         return list(csv.DictReader(source))
 
 
-# Добавляет в PDF слайд с двумя графиками кэшей.
-def cache_slide(pdf, title, rows):
+# Добавляет на график зоны границ кэшей.
+def add_cache_zones(axis, zones, labels=True, only_l3=False):
+    if only_l3:
+        zones = zones[-1:]
+    for left, right, label in zones:
+        axis.axvspan(left, right, color="gray", alpha=0.13)
+        axis.axvline(left, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
+        axis.axvline(right, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
+        if labels:
+            middle = (left * right) ** 0.5
+            text = "{}\nN: {:,}–{:,}".format(label, left, right)
+            axis.annotate(text.replace(",", " "), xy=(middle, 0),
+                          xycoords=("data", "axes fraction"),
+                          xytext=(0, 4), textcoords="offset points",
+                          rotation=90, ha="center", va="bottom",
+                          fontsize=8, color="dimgray")
+
+
+# Добавляет слайд с P- и E-ядром Windows.
+def windows_cache_slide(pdf, title, rows, zoom=False):
     figure, axes = plt.subplots(2, 1, figsize=(13.33, 7.5), sharex=True)
-    figure.suptitle(title, fontsize=24, weight="bold")
+    figure.suptitle(title, fontsize=23, weight="bold")
+
+    if zoom:
+        rows = [row for row in rows if int(row["n"]) >= 131072]
 
     for axis, core in zip(axes, ("P", "E")):
         for kernel in KERNELS:
             points = [row for row in rows
                       if row["core"] == core and row["kernel"] == kernel]
+            points.sort(key=lambda row: int(row["n"]))
             axis.plot([int(row["n"]) for row in points],
                       [float(row["median_gbps"]) for row in points],
-                      marker="o", markersize=4, linewidth=1.8,
-                      label=kernel)
+                      marker="o", markersize=4, linewidth=1.7, label=kernel)
         axis.set_xscale("log", base=2)
+        add_cache_zones(axis, WINDOWS_CACHE_ZONES[core], only_l3=zoom)
         axis.set_ylabel("ГБ/с")
-        axis.set_title(f"{core}-ядро, один поток")
+        axis.set_title("{}-ядро, один поток".format(core))
         axis.grid(True, alpha=0.25)
         axis.legend(ncol=4)
 
@@ -55,104 +101,219 @@ def cache_slide(pdf, title, rows):
     plt.close(figure)
 
 
-# Добавляет увеличенный слайд только с последней частью графика L3 и RAM.
-def cache_zoom_slide(pdf, title, rows):
-    rows = [row for row in rows if int(row["n"]) >= 131072]
-    figure, axes = plt.subplots(2, 1, figsize=(13.33, 7.5), sharex=True)
-    figure.suptitle(title, fontsize=24, weight="bold")
+# Добавляет слайд с четырьмя операциями для всех конфигураций.
+def all_profiles_slide(pdf, title, rows, profiles):
+    figure, axes = plt.subplots(2, 2, figsize=(13.33, 7.5), sharex=True)
+    figure.suptitle(title, fontsize=23, weight="bold")
 
-    for axis, core in zip(axes, ("P", "E")):
-        for kernel in KERNELS:
+    for axis, kernel in zip(axes.flat, KERNELS):
+        for profile in profiles:
             points = [row for row in rows
-                      if row["core"] == core and row["kernel"] == kernel]
+                      if row["profile"] == profile and row["kernel"] == kernel]
+            points.sort(key=lambda row: int(row["n"]))
             axis.plot([int(row["n"]) for row in points],
                       [float(row["median_gbps"]) for row in points],
-                      marker="o", markersize=5, linewidth=1.8,
-                      label=kernel)
+                      marker="o", markersize=2.6, linewidth=1.3, label=profile)
         axis.set_xscale("log", base=2)
+        axis.set_title(kernel)
         axis.set_ylabel("ГБ/с")
-        axis.set_title(f"{core}-ядро, один поток")
         axis.grid(True, alpha=0.25)
-        axis.legend(ncol=4)
+        axis.legend(fontsize=8)
 
-    axes[-1].set_xlabel("Число элементов в каждом массиве")
-    figure.tight_layout(rect=(0, 0, 1, 0.94))
+    for axis in axes[-1]:
+        axis.set_xlabel("Число элементов в каждом массиве")
+    figure.tight_layout(rect=(0, 0, 1, 0.93))
     pdf.savefig(figure)
     plt.close(figure)
 
 
-# Добавляет в PDF слайд со столбчатым графиком RAM.
-def ram_slide(pdf, title, rows, value_name):
+# Добавляет слайд со всеми операциями на одном ядре.
+def one_core_slide(pdf, title, rows, profile, zones):
     figure, axis = plt.subplots(figsize=(13.33, 7.5))
-    figure.suptitle(title, fontsize=24, weight="bold")
-    x = list(range(len(PROFILES)))
+    figure.suptitle(title, fontsize=23, weight="bold")
+
+    for kernel in KERNELS:
+        points = [row for row in rows
+                  if row["profile"] == profile and row["kernel"] == kernel]
+        points.sort(key=lambda row: int(row["n"]))
+        axis.plot([int(row["n"]) for row in points],
+                  [float(row["median_gbps"]) for row in points],
+                  marker="o", markersize=4, linewidth=1.7, label=kernel)
+
+    axis.set_xscale("log", base=2)
+    add_cache_zones(axis, zones)
+    axis.set_xlabel("Число элементов в каждом массиве")
+    axis.set_ylabel("ГБ/с")
+    axis.grid(True, alpha=0.25)
+    axis.legend(ncol=4)
+    figure.tight_layout(rect=(0, 0, 1, 0.93))
+    pdf.savefig(figure)
+    plt.close(figure)
+
+
+# Добавляет столбчатый слайд для последней точки RAM.
+def ram_slide(pdf, title, rows, profiles, labels):
+    ram_n = max(int(row["n"]) for row in rows)
+    figure, axis = plt.subplots(figsize=(13.33, 7.5))
+    figure.suptitle("{}\nN = {:,}".format(title, ram_n).replace(",", " "),
+                    fontsize=23, weight="bold")
+    x = list(range(len(profiles)))
     width = 0.2
 
     for number, kernel in enumerate(KERNELS):
-        values = [float(row[value_name]) for profile in PROFILES
-                  for row in rows
-                  if row["profile"] == profile and row["kernel"] == kernel]
+        values = []
+        for profile in profiles:
+            row = next(row for row in rows
+                       if row["profile"] == profile
+                       and row["kernel"] == kernel
+                       and int(row["n"]) == ram_n)
+            values.append(float(row["median_gbps"]))
         positions = [value + (number - 1.5) * width for value in x]
         axis.bar(positions, values, width, label=kernel)
 
-    axis.set_xticks(x, PROFILE_LABELS, rotation=20, ha="right")
-    axis.set_xlabel("Используемые ядра")
+    axis.set_xticks(x, labels, rotation=18, ha="right")
+    axis.set_xlabel("Конфигурация")
     axis.set_ylabel("ГБ/с")
-    axis.grid(True, alpha=0.25)
+    axis.grid(True, axis="y", alpha=0.25)
     axis.legend(ncol=4)
     figure.tight_layout(rect=(0, 0, 1, 0.88))
     pdf.savefig(figure)
     plt.close(figure)
 
 
-# Добавляет в PDF слайд со сравнением двух реализаций.
-def comparison_slide(pdf, my_rows, official_rows):
+# Добавляет сравнение двух реализаций на одном ядре по всем N.
+def one_core_comparison_slide(pdf, title, mine, official,
+                              my_profile, official_profile, zones):
     figure, axes = plt.subplots(2, 2, figsize=(13.33, 7.5), sharex=True)
-    figure.suptitle("Сравнение с официальным STREAM 5.10\n"
-                    "N = 67 108 864 элементов в каждом массиве",
-                    fontsize=24, weight="bold")
-    x = list(range(len(PROFILES)))
+    figure.suptitle(title, fontsize=23, weight="bold")
 
     for axis, kernel in zip(axes.flat, KERNELS):
-        mine = [float(row["best_gbps"]) for profile in PROFILES
-                for row in my_rows
-                if row["profile"] == profile and row["kernel"] == kernel]
-        official = [float(row["best_gbps"]) for profile in PROFILES
-                    for row in official_rows
-                    if row["profile"] == profile and row["kernel"] == kernel]
-        axis.bar([value - 0.2 for value in x], mine, 0.4, label="Моя")
-        axis.bar([value + 0.2 for value in x], official, 0.4,
-                 label="STREAM 5.10")
+        my_points = {
+            int(row["n"]): float(row["median_gbps"])
+            for row in mine
+            if row["profile"] == my_profile and row["kernel"] == kernel
+        }
+        official_points = {
+            int(row["n"]): float(row["median_gbps"])
+            for row in official
+            if row["profile"] == official_profile and row["kernel"] == kernel
+        }
+        sizes = sorted(set(my_points) & set(official_points))
+        axis.plot(sizes, [my_points[size] for size in sizes],
+                  marker="o", markersize=3, label="Моя реализация")
+        axis.plot(sizes, [official_points[size] for size in sizes],
+                  marker="o", markersize=3, label="STREAM 5.10")
+        axis.set_xscale("log", base=2)
+        add_cache_zones(axis, zones, labels=False)
         axis.set_title(kernel)
         axis.set_ylabel("ГБ/с")
         axis.grid(True, alpha=0.25)
         axis.legend()
 
     for axis in axes[-1]:
-        axis.set_xticks(x, PROFILE_LABELS, rotation=20, ha="right")
+        axis.set_xlabel("Число элементов в каждом массиве")
+    figure.tight_layout(rect=(0, 0, 1, 0.93))
+    pdf.savefig(figure)
+    plt.close(figure)
 
+
+# Добавляет сравнение RAM двух реализаций Polus.
+def ram_comparison_slide(pdf, mine, official):
+    ram_n = min(
+        max(int(row["n"]) for row in mine),
+        max(int(row["n"]) for row in official),
+    )
+    figure, axes = plt.subplots(2, 2, figsize=(13.33, 7.5), sharex=True)
+    title = "Polus POWER8 — сравнение RAM\nN = {:,}".format(ram_n)
+    figure.suptitle(title.replace(",", " "), fontsize=23, weight="bold")
+    x = list(range(len(POLUS_PROFILES)))
+
+    for axis, kernel in zip(axes.flat, KERNELS):
+        my_values = []
+        official_values = []
+        for profile in POLUS_PROFILES:
+            my_row = next(row for row in mine
+                          if row["profile"] == profile
+                          and row["kernel"] == kernel
+                          and int(row["n"]) == ram_n)
+            official_row = next(row for row in official
+                                if row["profile"] == profile
+                                and row["kernel"] == kernel
+                                and int(row["n"]) == ram_n)
+            my_values.append(float(my_row["median_gbps"]))
+            official_values.append(float(official_row["median_gbps"]))
+        axis.bar([value - 0.2 for value in x], my_values, 0.4,
+                 label="Моя реализация")
+        axis.bar([value + 0.2 for value in x], official_values, 0.4,
+                 label="STREAM 5.10")
+        axis.set_title(kernel)
+        axis.set_ylabel("ГБ/с")
+        axis.grid(True, axis="y", alpha=0.25)
+        axis.legend()
+
+    for axis in axes[-1]:
+        axis.set_xticks(x, POLUS_LABELS, rotation=15, ha="right")
     figure.tight_layout(rect=(0, 0, 1, 0.88))
     pdf.savefig(figure)
     plt.close(figure)
 
 
-# Создаёт презентацию только из слайдов с графиками.
+# Создаёт PDF только из слайдов с графиками.
 def main():
-    my_cache = read_csv(MY_RESULTS, "cache_results.csv")
-    official_cache = read_csv(OFFICIAL_RESULTS, "cache_results.csv")
-    my_ram = read_csv(MY_RESULTS, "ram_results.csv")
-    official_ram = read_csv(OFFICIAL_RESULTS, "ram_results.csv")
+    my_windows_all = read_csv(MY_WINDOWS)
+    my_windows_cache = read_csv(MY_WINDOWS, "cache_results.csv")
+    official_windows_all = read_csv(OFFICIAL_WINDOWS)
+    my_polus = read_csv(MY_POLUS)
+    official_polus = read_csv(OFFICIAL_POLUS)
 
     with PdfPages(PDF) as pdf:
-        cache_slide(pdf, "Кэши — моя реализация", my_cache)
-        cache_zoom_slide(pdf, "L3 и RAM — моя реализация", my_cache)
-        cache_slide(pdf, "Кэши — старая реализация", official_cache)
-        ram_slide(pdf, "Оперативная память — моя реализация\n"
-                  "N = 67 108 864 элементов в каждом массиве",
-                  my_ram, "median_gbps")
-        comparison_slide(pdf, my_ram, official_ram)
+        windows_cache_slide(
+            pdf, "Windows — моя реализация: скорости кэшей",
+            my_windows_cache,
+        )
+        windows_cache_slide(
+            pdf, "Windows — моя реализация: L3 и RAM",
+            my_windows_cache, zoom=True,
+        )
+        ram_slide(
+            pdf, "Windows — моя реализация: конфигурации ядер",
+            my_windows_all, WINDOWS_PROFILES, WINDOWS_LABELS,
+        )
+        one_core_comparison_slide(
+            pdf, "Windows — сравнение с STREAM 5.10 на одном P-ядре",
+            my_windows_all, official_windows_all,
+            "p1", "p1", WINDOWS_CACHE_ZONES["P"],
+        )
 
-    print(f"Готово: {PDF}")
+        one_core_slide(
+            pdf, "Polus POWER8 — моя реализация: одно ядро",
+            my_polus, "1core", POLUS_CACHE_ZONES,
+        )
+        all_profiles_slide(
+            pdf, "Polus POWER8 — моя реализация: все конфигурации",
+            my_polus, POLUS_PROFILES,
+        )
+        ram_slide(
+            pdf, "Polus POWER8 — моя реализация: конфигурации ядер",
+            my_polus, POLUS_PROFILES, POLUS_LABELS,
+        )
+
+        one_core_slide(
+            pdf, "Polus POWER8 — STREAM 5.10: одно ядро",
+            official_polus, "1core", POLUS_CACHE_ZONES,
+        )
+        all_profiles_slide(
+            pdf, "Polus POWER8 — STREAM 5.10: все конфигурации",
+            official_polus, POLUS_PROFILES,
+        )
+        one_core_comparison_slide(
+            pdf, "Polus POWER8 — сравнение на одном ядре",
+            my_polus, official_polus,
+            "1core", "1core", POLUS_CACHE_ZONES,
+        )
+        ram_comparison_slide(pdf, my_polus, official_polus)
+
+    print("Готово: {}".format(PDF.name))
 
 
 if __name__ == "__main__":

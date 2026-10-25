@@ -77,8 +77,6 @@ def run_tests():
             number += 1
             print(f"{number}/{total}: {profile}, N = {size}", flush=True)
             repeats = max(1, 800_000_000 // (24 * size))
-            if len(cpus) > 1:
-                repeats = min(repeats, 100)
             for row in benchmark(size, len(cpus), 7, repeats, cpus):
                 all_rows.append({
                     "profile": profile,

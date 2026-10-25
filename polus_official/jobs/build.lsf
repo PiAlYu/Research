@@ -1,0 +1,11 @@
+#BSUB -J official_stream_build
+#BSUB -q short
+#BSUB -W 00:05
+#BSUB -n 1
+#BSUB -R "span[hosts=1]"
+#BSUB -o logs/build.%J.out
+#BSUB -e logs/build.%J.err
+
+cd "$LS_SUBCWD"
+g++ --version | head -1
+python3 run.py build
