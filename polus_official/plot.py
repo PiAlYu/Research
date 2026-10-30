@@ -1,5 +1,6 @@
 import csv
 from pathlib import Path
+import sys
 
 import matplotlib
 
@@ -8,8 +9,9 @@ import matplotlib.pyplot as plt
 
 
 ROOT = Path(__file__).resolve().parent
-RESULTS = ROOT / "results"
-MY_RESULTS = ROOT.parent / "polus" / "results" / "all_results.csv"
+RESULTS = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / "results"
+MY_RESULTS = (Path(sys.argv[2]).resolve() if len(sys.argv) > 2
+              else ROOT.parent / "polus" / "results" / "all_results.csv")
 OFFICIAL_RESULTS = RESULTS / "all_results.csv"
 KERNELS = ("Copy", "Scale", "Add", "Triad")
 
@@ -17,7 +19,15 @@ CACHE_ZONES = [
     (2730, 4096, "L1 = 64 КиБ"),
     (21845, 32768, "L2 = 512 КиБ"),
     (349525, 524288, "L3 = 8 МиБ"),
+    (2796203, 4194304, "L4 до 64 МиБ на сокет"),
 ]
+
+
+# Подписывает график, построенный по наглядной версии данных.
+def visual_suffix(rows):
+    if rows and rows[0].get("data_kind") == "visualized":
+        return " — наглядное представление"
+    return ""
 
 
 # Читает строки одного CSV-файла.
@@ -44,6 +54,15 @@ def add_cache_zones(axis, labels=True):
                           fontsize=8, color="dimgray")
 
 
+# Показывает одну границу для операции с двумя или тремя массивами.
+def add_cache_limits(axis, kernel):
+    use_right = kernel in ("Copy", "Scale")
+    for left, right, label in CACHE_ZONES:
+        position = right if use_right else left
+        axis.axvline(position, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
+
+
 # Строит четыре операции официального STREAM для всех конфигураций.
 def plot_all(rows):
     profiles = list(dict.fromkeys(row["profile"] for row in rows))
@@ -65,7 +84,8 @@ def plot_all(rows):
 
     for axis in axes[-1]:
         axis.set_xlabel("Число элементов в каждом массиве")
-    figure.suptitle("Polus POWER8: STREAM 5.10 cache sweep")
+    figure.suptitle("Polus POWER8: STREAM 5.10 cache sweep{}".format(
+        visual_suffix(rows)))
     figure.tight_layout()
     figure.savefig(RESULTS / "all_results.svg", metadata={"Date": None})
     plt.close(figure)
@@ -85,7 +105,8 @@ def plot_one_core(rows):
     add_cache_zones(axis)
     axis.set_xlabel("Число элементов в каждом массиве")
     axis.set_ylabel("ГБ/с")
-    axis.set_title("Polus POWER8: STREAM 5.10, одно ядро")
+    axis.set_title("Polus POWER8: STREAM 5.10, одно ядро{}".format(
+        visual_suffix(rows)))
     axis.grid(True, alpha=0.25)
     axis.legend(ncol=4)
     figure.tight_layout()
@@ -115,8 +136,8 @@ def plot_ram(rows):
     axis.set_xticks(x, profiles)
     axis.set_xlabel("Конфигурация")
     axis.set_ylabel("ГБ/с")
-    axis.set_title("Polus POWER8: STREAM 5.10, RAM, N = {:,}".format(
-        ram_n).replace(",", " "))
+    axis.set_title("Polus POWER8: STREAM 5.10, RAM, N = {:,}{}".format(
+        ram_n, visual_suffix(rows)).replace(",", " "))
     axis.grid(True, axis="y", alpha=0.25)
     axis.legend(ncol=4)
     figure.tight_layout()
@@ -145,7 +166,7 @@ def plot_comparison(mine, official):
         axis.plot(sizes, [official_points[size] for size in sizes],
                   marker="o", markersize=3, label="STREAM 5.10")
         axis.set_xscale("log", base=2)
-        add_cache_zones(axis, labels=False)
+        add_cache_limits(axis, kernel)
         axis.set_title(kernel)
         axis.set_ylabel("ГБ/с")
         axis.grid(True, alpha=0.25)
@@ -153,7 +174,9 @@ def plot_comparison(mine, official):
 
     for axis in axes[-1]:
         axis.set_xlabel("Число элементов в каждом массиве")
-    figure.suptitle("Polus POWER8: сравнение на одном физическом ядре")
+    figure.suptitle(
+        "Polus POWER8: сравнение на одном физическом ядре{}".format(
+            visual_suffix(official)))
     figure.tight_layout()
     figure.savefig(RESULTS / "single_core_comparison.svg",
                    metadata={"Date": None})

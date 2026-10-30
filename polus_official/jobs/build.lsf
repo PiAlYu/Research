@@ -1,11 +1,12 @@
-#BSUB -J official_stream_build
+#BSUB -J official_stream_build_xl
 #BSUB -q short
 #BSUB -W 00:05
 #BSUB -n 1
+#BSUB -m "polus-c4-ib.bmc.hpc.cs.msu.ru"
 #BSUB -R "span[hosts=1]"
 #BSUB -o logs/build.%J.out
 #BSUB -e logs/build.%J.err
 
 cd "$LS_SUBCWD"
-g++ --version | head -1
 python3 run.py build
+./build/stream_official_xl 1 3 1 0

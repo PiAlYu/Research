@@ -15,6 +15,15 @@ using Clock = std::chrono::steady_clock;
 
 const double TARGET_SECONDS = 2.0;
 const int STREAMING_STORE_N = 4194304;
+const int B_GAP_DOUBLES = 8;
+const int C_GAP_DOUBLES = 160;
+std::vector<int> cpu_ids;
+
+// Закрепляет текущую нить OpenMP за выбранным логическим процессором.
+void pin_thread() {
+    int thread = omp_get_thread_num();
+    SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)(1ULL << cpu_ids[thread]));
+}
 
 // Копирует по 16 чисел за шаг с помощью AVX2.
 void copy_array(double* __restrict c, const double* __restrict a, int n, int repeats) {
@@ -23,6 +32,7 @@ void copy_array(double* __restrict c, const double* __restrict a, int n, int rep
 
 #pragma omp parallel
     {
+        pin_thread();
         int thread = omp_get_thread_num();
         int threads = omp_get_num_threads();
         int blocks = limit / 16;
@@ -50,13 +60,14 @@ void copy_array(double* __restrict c, const double* __restrict a, int n, int rep
             }
             if (thread == 0)
                 for (int i = limit; i < n; i++) c[i] = a[i];
-            if (streaming) _mm_sfence();
         }
+        if (streaming) _mm_sfence();
     }
 }
 
 // Выполняет одну из четырёх операций STREAM.
-void stream_kernel(int kernel, double* a, double* b, double* c, int n, int repeats) {
+void stream_kernel(int kernel, double* __restrict a, double* __restrict b,
+                   double* __restrict c, int n, int repeats) {
     if (kernel == 0) {
         copy_array(c, a, n, repeats);
         return;
@@ -64,6 +75,7 @@ void stream_kernel(int kernel, double* a, double* b, double* c, int n, int repea
 
 #pragma omp parallel
     {
+        pin_thread();
         int thread = omp_get_thread_num();
         int threads = omp_get_num_threads();
         int blocks = (n + 7) / 8;
@@ -128,19 +140,22 @@ int main(int argc, char* argv[]) {
     int threads = std::atoi(argv[2]);
     int min_samples = std::atoi(argv[3]);
     int repeats = std::atoi(argv[4]);
-    unsigned long long mask = std::strtoull(argv[5], 0, 10);
+    for (int i = 0; i < threads; i++) cpu_ids.push_back(std::atoi(argv[5 + i]));
 
     omp_set_dynamic(0);
     omp_set_num_threads(threads);
-    SetProcessAffinityMask(GetCurrentProcess(), (DWORD_PTR)mask);
+    DWORD_PTR mask = 0;
+    for (int cpu : cpu_ids) mask |= (DWORD_PTR)(1ULL << cpu);
+    SetProcessAffinityMask(GetCurrentProcess(), mask);
 
-    size_t stride = ((size_t)n + 7) / 8 * 8 + 8;
-    std::vector<double> memory(3 * stride + 8);
+    size_t array_size = ((size_t)n + 7) / 8 * 8;
+    std::vector<double> memory(3 * array_size + B_GAP_DOUBLES
+                               + C_GAP_DOUBLES + 8);
     uintptr_t address = (uintptr_t)memory.data();
     size_t shift = (64 - address % 64) % 64 / sizeof(double);
     double* a = memory.data() + shift;
-    double* b = a + stride;
-    double* c = b + stride;
+    double* b = a + array_size + B_GAP_DOUBLES;
+    double* c = b + array_size + C_GAP_DOUBLES;
 
     for (int i = 0; i < n; i++) {
         a[i] = 1.0;

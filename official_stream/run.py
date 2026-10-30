@@ -44,7 +44,7 @@ def build_cache(size):
     command = (
         f'call "{VCVARS}" >nul && '
         f'cl /nologo /O2 /EHsc /std:c++17 /openmp /arch:AVX2 '
-        f'/DSTREAM_ARRAY_SIZE={size} /I"{COMPAT}" "{CACHE_RUNNER}" '
+        f'/DSTREAM_ARRAY_SIZE={size} /DOFFSET=160 /I"{COMPAT}" "{CACHE_RUNNER}" '
         f'/Fo:"{BUILD / "cache.obj"}" /Fe:"{CACHE_PROGRAM}"'
     )
     subprocess.run(command, cwd=ROOT, shell=True, check=True,
@@ -53,11 +53,8 @@ def build_cache(size):
 
 # Запускает официальный тест одного размера кэша.
 def cache_benchmark(size, cpus):
-    mask = sum(1 << cpu for cpu in cpus)
-    repeats = max(1, 800_000_000 // (24 * size))
-    if len(cpus) > 1:
-        repeats = min(repeats, 100)
-    command = [CACHE_PROGRAM, len(cpus), 7, repeats, mask]
+    repeats = max(1, 12_000_000_000 // (24 * size))
+    command = [CACHE_PROGRAM, len(cpus), 7, repeats, *cpus]
     result = subprocess.run(list(map(str, command)), capture_output=True,
                             text=True, check=True)
     return list(csv.DictReader(result.stdout.splitlines()))

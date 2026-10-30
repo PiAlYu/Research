@@ -26,6 +26,14 @@ WINDOWS_LABELS = (
 )
 POLUS_PROFILES = ("1core", "10cores", "20cores", "20cores_smt2")
 POLUS_LABELS = ("1 ядро", "10 ядер", "20 ядер", "20 ядер, SMT2")
+MY_POLUS_PROFILES = (
+    "1core", "2cores", "4cores", "6cores",
+    "8cores", "10cores", "20cores", "20cores_smt2",
+)
+MY_POLUS_LABELS = (
+    "1 ядро", "2 ядра", "4 ядра", "6 ядер",
+    "8 ядер", "10 ядер", "20 ядер", "20 ядер, SMT2",
+)
 
 WINDOWS_CACHE_ZONES = {
     "P": (
@@ -43,6 +51,7 @@ POLUS_CACHE_ZONES = (
     (2730, 4096, "L1 = 64 КиБ"),
     (21845, 32768, "L2 = 512 КиБ"),
     (349525, 524288, "L3 = 8 МиБ"),
+    (2796203, 4194304, "L4 до 64 МиБ на сокет"),
 )
 
 
@@ -70,6 +79,15 @@ def add_cache_zones(axis, zones, labels=True, only_l3=False):
                           xytext=(0, 4), textcoords="offset points",
                           rotation=90, ha="center", va="bottom",
                           fontsize=8, color="dimgray")
+
+
+# Добавляет одну границу кэша для выбранной операции.
+def add_cache_limits(axis, zones, kernel):
+    use_right = kernel in ("Copy", "Scale")
+    for left, right, label in zones:
+        position = right if use_right else left
+        axis.axvline(position, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
 
 
 # Добавляет слайд с P- и E-ядром Windows.
@@ -103,6 +121,8 @@ def windows_cache_slide(pdf, title, rows, zoom=False):
 
 # Добавляет слайд с четырьмя операциями для всех конфигураций.
 def all_profiles_slide(pdf, title, rows, profiles):
+    available = set(row["profile"] for row in rows)
+    profiles = [profile for profile in profiles if profile in available]
     figure, axes = plt.subplots(2, 2, figsize=(13.33, 7.5), sharex=True)
     figure.suptitle(title, fontsize=23, weight="bold")
 
@@ -153,6 +173,11 @@ def one_core_slide(pdf, title, rows, profile, zones):
 
 # Добавляет столбчатый слайд для последней точки RAM.
 def ram_slide(pdf, title, rows, profiles, labels):
+    available = set(row["profile"] for row in rows)
+    selected = [(profile, label) for profile, label in zip(profiles, labels)
+                if profile in available]
+    profiles = [profile for profile, label in selected]
+    labels = [label for profile, label in selected]
     ram_n = max(int(row["n"]) for row in rows)
     figure, axis = plt.subplots(figsize=(13.33, 7.5))
     figure.suptitle("{}\nN = {:,}".format(title, ram_n).replace(",", " "),
@@ -204,7 +229,7 @@ def one_core_comparison_slide(pdf, title, mine, official,
         axis.plot(sizes, [official_points[size] for size in sizes],
                   marker="o", markersize=3, label="STREAM 5.10")
         axis.set_xscale("log", base=2)
-        add_cache_zones(axis, zones, labels=False)
+        add_cache_limits(axis, zones, kernel)
         axis.set_title(kernel)
         axis.set_ylabel("ГБ/с")
         axis.grid(True, alpha=0.25)
@@ -291,11 +316,11 @@ def main():
         )
         all_profiles_slide(
             pdf, "Polus POWER8 — моя реализация: все конфигурации",
-            my_polus, POLUS_PROFILES,
+            my_polus, MY_POLUS_PROFILES,
         )
         ram_slide(
             pdf, "Polus POWER8 — моя реализация: конфигурации ядер",
-            my_polus, POLUS_PROFILES, POLUS_LABELS,
+            my_polus, MY_POLUS_PROFILES, MY_POLUS_LABELS,
         )
 
         one_core_slide(

@@ -8,12 +8,12 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build"
-RESULTS = ROOT / "results"
+RESULTS = ROOT / "results_xl"
 SOURCE = ROOT / "stream_runner.cpp"
-PROGRAM = BUILD / "stream_official"
+PROGRAM = BUILD / "stream_official_xl"
 
 CSV_FIELDS = [
-    "machine", "implementation", "profile", "cpu_ids", "n",
+    "machine", "implementation", "compiler", "profile", "cpu_ids", "n",
     "one_array_kib", "three_arrays_kib", "one_array_mib",
     "three_arrays_gib", "kernel", "threads", "bytes_per_element",
     "repeats", "samples", "processed_gb", "measurement_seconds",
@@ -30,6 +30,10 @@ SIZES = [
 
 PROFILES = [
     ("1core", [0]),
+    ("2cores", [0, 8]),
+    ("4cores", [0, 8, 16, 24]),
+    ("6cores", [0, 8, 16, 24, 32, 40]),
+    ("8cores", [0, 8, 16, 24, 32, 40, 48, 56]),
     ("10cores", [0, 8, 16, 24, 32, 40, 48, 56, 64, 72]),
     ("20cores", [
         0, 8, 16, 24, 32, 40, 48, 56, 64, 72,
@@ -49,11 +53,12 @@ def build(size):
     if not BUILD.exists():
         BUILD.mkdir()
     command = [
-        "g++", "-O3", "-fopenmp", "-std=c++11",
-        "-mcpu=power8", "-mtune=power8", "-mcmodel=medium",
+        "xlC_r", "-O4", "-q64", "-qarch=pwr8", "-qtune=pwr8",
+        "-qsmp=omp", "-qlanglvl=extended0x", "-qmaxmem=-1",
         "-DSTREAM_ARRAY_SIZE={}".format(size),
         str(SOURCE), "-o", str(PROGRAM),
     ]
+    print("Command: {}".format(" ".join(command)))
     subprocess.check_call(command, cwd=str(ROOT))
 
 
@@ -102,6 +107,7 @@ def run_all():
                 result = {
                     "machine": "Polus_POWER8",
                     "implementation": "STREAM_5.10_cache_sweep",
+                    "compiler": "IBM_XL_C++",
                     "profile": profile,
                     "cpu_ids": " ".join(map(str, cpus)),
                     "n": size,
@@ -119,7 +125,7 @@ def run_all():
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "build":
-        build(256)
+        build(SIZES[-1])
     if command == "all":
         run_all()
 

@@ -19,20 +19,42 @@ extern "C" {
 using Clock = std::chrono::steady_clock;
 
 const double TARGET_SECONDS = 2.0;
+std::vector<int> cpu_ids;
 
-// Вызывает одну из четырёх официальных операций STREAM.
-void stream_kernel(int kernel) {
-    if (kernel == 0) tuned_STREAM_Copy();
-    if (kernel == 1) tuned_STREAM_Scale(3.0);
-    if (kernel == 2) tuned_STREAM_Add();
-    if (kernel == 3) tuned_STREAM_Triad(3.0);
+// Закрепляет текущую нить OpenMP за выбранным логическим процессором.
+void pin_thread() {
+    int thread = omp_get_thread_num();
+    SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)(1ULL << cpu_ids[thread]));
+}
+
+// Выполняет повторы одной операции STREAM внутри одной параллельной области.
+void stream_kernel(int kernel, int repeats) {
+#pragma omp parallel
+    {
+        pin_thread();
+        int thread = omp_get_thread_num();
+        int threads = omp_get_num_threads();
+        int begin = STREAM_ARRAY_SIZE * thread / threads;
+        int end = STREAM_ARRAY_SIZE * (thread + 1) / threads;
+
+        for (int repeat = 0; repeat < repeats; repeat++) {
+            if (kernel == 0)
+                for (int i = begin; i < end; i++) c[i] = a[i];
+            if (kernel == 1)
+                for (int i = begin; i < end; i++) b[i] = 3.0 * c[i];
+            if (kernel == 2)
+                for (int i = begin; i < end; i++) c[i] = a[i] + b[i];
+            if (kernel == 3)
+                for (int i = begin; i < end; i++) a[i] = b[i] + 3.0 * c[i];
+        }
+    }
 }
 
 // Измеряет официальную операцию не меньше 2 секунд.
 void measure(int kernel, int repeats, int min_samples, int bytes, int& samples,
              double& total, double& median_time, double& best_time,
              double& median, double& best) {
-    stream_kernel(kernel);
+    stream_kernel(kernel, 1);
     std::vector<double> rates;
     std::vector<double> times;
     total = 0.0;
@@ -40,8 +62,7 @@ void measure(int kernel, int repeats, int min_samples, int bytes, int& samples,
     while ((int)rates.size() < min_samples || total < TARGET_SECONDS) {
         auto start = Clock::now();
 
-        for (int repeat = 0; repeat < repeats; repeat++)
-            stream_kernel(kernel);
+        stream_kernel(kernel, repeats);
 
         auto finish = Clock::now();
         double seconds = std::chrono::duration<double>(finish - start).count();
@@ -70,16 +91,26 @@ int main(int argc, char* argv[]) {
     int threads = std::atoi(argv[1]);
     int min_samples = std::atoi(argv[2]);
     int repeats = std::atoi(argv[3]);
-    unsigned long long mask = std::strtoull(argv[4], 0, 10);
+    for (int i = 0; i < threads; i++) cpu_ids.push_back(std::atoi(argv[4 + i]));
 
     omp_set_dynamic(0);
     omp_set_num_threads(threads);
-    SetProcessAffinityMask(GetCurrentProcess(), (DWORD_PTR)mask);
+    DWORD_PTR mask = 0;
+    for (int cpu : cpu_ids) mask |= (DWORD_PTR)(1ULL << cpu);
+    SetProcessAffinityMask(GetCurrentProcess(), mask);
 
-    for (int i = 0; i < STREAM_ARRAY_SIZE; i++) {
-        a[i] = 1.0;
-        b[i] = 2.0;
-        c[i] = 0.0;
+#pragma omp parallel
+    {
+        pin_thread();
+        int thread = omp_get_thread_num();
+        int threads_count = omp_get_num_threads();
+        int begin = STREAM_ARRAY_SIZE * thread / threads_count;
+        int end = STREAM_ARRAY_SIZE * (thread + 1) / threads_count;
+        for (int i = begin; i < end; i++) {
+            a[i] = 1.0;
+            b[i] = 2.0;
+            c[i] = 0.0;
+        }
     }
 
     const char* names[4] = {"Copy", "Scale", "Add", "Triad"};

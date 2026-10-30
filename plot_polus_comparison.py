@@ -12,6 +12,21 @@ MY = ROOT / "polus" / "results"
 OFFICIAL = ROOT / "polus_official" / "results"
 RESULTS = ROOT / "results"
 KERNELS = ("Copy", "Scale", "Add", "Triad")
+CACHE_ZONES = (
+    (2730, 4096),
+    (21845, 32768),
+    (349525, 524288),
+    (2796203, 4194304),
+)
+
+
+# Показывает диапазоны выхода двух или трёх массивов за границы кэшей.
+def add_cache_limits(axis, kernel):
+    use_right = kernel in ("Copy", "Scale")
+    for left, right in CACHE_ZONES:
+        position = right if use_right else left
+        axis.axvline(position, color="gray", linestyle="--",
+                     linewidth=0.8, alpha=0.7)
 
 
 # Читает CSV-файл с результатами.
@@ -32,6 +47,7 @@ def plot_one_core(mine, official):
                       [float(row["median_gbps"]) for row in points],
                       marker="o", markersize=3, label=label)
         axis.set_xscale("log", base=2)
+        add_cache_limits(axis, kernel)
         axis.set_title(kernel)
         axis.set_ylabel("ГБ/с")
         axis.grid(True, alpha=0.25)
@@ -47,7 +63,10 @@ def plot_one_core(mine, official):
 
 # Сравнивает две реализации в последней точке RAM.
 def plot_ram(mine, official):
-    profiles = list(dict.fromkeys(row["profile"] for row in mine))
+    official_profiles = set(row["profile"] for row in official)
+    profiles = [profile for profile in
+                dict.fromkeys(row["profile"] for row in mine)
+                if profile in official_profiles]
     ram_n = max(int(row["n"]) for row in mine)
     x = list(range(len(profiles)))
     figure, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)

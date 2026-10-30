@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -11,6 +12,17 @@
 #include <sched.h>
 
 using Clock = std::chrono::steady_clock;
+
+#if defined(__GNUC__) || defined(__clang__)
+#define STREAM_RESTRICT __restrict__
+#else
+#define STREAM_RESTRICT __restrict
+#endif
+
+// Не даёт компилятору удалить одинаковые повторения цикла.
+void compiler_barrier() {
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+}
 
 const double TARGET_SECONDS = 2.0;
 std::vector<int> thread_cpus;
@@ -32,7 +44,41 @@ void read_cpus(const char* text) {
         thread_cpus.push_back(std::atoi(value.c_str()));
 }
 
-// Выполняет одну из четырёх операций STREAM.
+// Копирует один массив в другой.
+void copy_kernel(const double* STREAM_RESTRICT a, double* STREAM_RESTRICT c, long long n, int repeats) {
+    for (int repeat = 0; repeat < repeats; repeat++) {
+        for (long long i = 0; i < n; i++) c[i] = a[i];
+        compiler_barrier();
+    }
+}
+
+// Умножает элементы массива на число.
+void scale_kernel(const double* STREAM_RESTRICT c, double* STREAM_RESTRICT b, long long n, int repeats) {
+    for (int repeat = 0; repeat < repeats; repeat++) {
+        for (long long i = 0; i < n; i++) b[i] = 3.0 * c[i];
+        compiler_barrier();
+    }
+}
+
+// Складывает два массива.
+void add_kernel(const double* STREAM_RESTRICT a, const double* STREAM_RESTRICT b,
+                double* STREAM_RESTRICT c, long long n, int repeats) {
+    for (int repeat = 0; repeat < repeats; repeat++) {
+        for (long long i = 0; i < n; i++) c[i] = a[i] + b[i];
+        compiler_barrier();
+    }
+}
+
+// Складывает массив и умноженный на число второй массив.
+void triad_kernel(const double* STREAM_RESTRICT b, const double* STREAM_RESTRICT c,
+                  double* STREAM_RESTRICT a, long long n, int repeats) {
+    for (int repeat = 0; repeat < repeats; repeat++) {
+        for (long long i = 0; i < n; i++) a[i] = b[i] + 3.0 * c[i];
+        compiler_barrier();
+    }
+}
+
+// Выполняет выбранную операцию в постоянной параллельной области.
 void stream_kernel(int kernel, double* a, double* b, double* c, long long n, int repeats) {
 #pragma omp parallel
     {
@@ -42,21 +88,12 @@ void stream_kernel(int kernel, double* a, double* b, double* c, long long n, int
         long long blocks = (n + 15) / 16;
         long long begin = std::min(n, blocks * thread / threads * 16);
         long long end = std::min(n, blocks * (thread + 1) / threads * 16);
+        long long count = end - begin;
 
-        for (int repeat = 0; repeat < repeats; repeat++) {
-            if (kernel == 0) {
-                for (long long i = begin; i < end; i++) c[i] = a[i];
-            }
-            if (kernel == 1) {
-                for (long long i = begin; i < end; i++) b[i] = 3.0 * c[i];
-            }
-            if (kernel == 2) {
-                for (long long i = begin; i < end; i++) c[i] = a[i] + b[i];
-            }
-            if (kernel == 3) {
-                for (long long i = begin; i < end; i++) a[i] = b[i] + 3.0 * c[i];
-            }
-        }
+        if (kernel == 0) copy_kernel(a + begin, c + begin, count, repeats);
+        if (kernel == 1) scale_kernel(c + begin, b + begin, count, repeats);
+        if (kernel == 2) add_kernel(a + begin, b + begin, c + begin, count, repeats);
+        if (kernel == 3) triad_kernel(b + begin, c + begin, a + begin, count, repeats);
     }
 }
 

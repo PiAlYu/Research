@@ -1,6 +1,6 @@
-#BSUB -J official_stream_all
+#BSUB -J official_stream_all_xl
 #BSUB -q normal
-#BSUB -W 01:00
+#BSUB -W 02:00
 #BSUB -n 20
 #BSUB -m "polus-c4-ib.bmc.hpc.cs.msu.ru"
 #BSUB -R "span[hosts=1]"
@@ -8,5 +8,4 @@
 #BSUB -e logs/all.%J.err
 
 cd "$LS_SUBCWD"
-echo "Host: $(hostname)"
 ./jobs/run_all.sh

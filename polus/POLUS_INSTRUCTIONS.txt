@@ -1,0 +1,179 @@
+ПОЛНЫЙ ЗАПУСК МОЕЙ ВЕРСИИ STREAM НА POLUS
+
+Локальная папка Windows:
+C:\Users\aypir\source\repos\Research\polus
+
+Та же папка в WSL:
+/mnt/c/Users/aypir/source/repos/Research/polus
+
+Пользователь Polus:
+edu-cmc-sqi26-11
+
+Сервер:
+polus.cs.msu.ru
+
+
+1. Открыть WSL и проверить ключ
+
+chmod 600 ~/.ssh/id_rsa_hpc
+ssh -i ~/.ssh/id_rsa_hpc edu-cmc-sqi26-11@polus.cs.msu.ru
+
+После успешного входа выйти обратно в WSL:
+
+logout
+
+
+2. Удалить старые файлы программы на Polus и создать чистые папки
+
+ssh -i ~/.ssh/id_rsa_hpc edu-cmc-sqi26-11@polus.cs.msu.ru \
+  'rm -rf ~/stream-polus/jobs && mkdir -p ~/stream-polus/jobs ~/stream-polus/build ~/stream-polus/results ~/stream-polus/logs'
+
+
+3. Перейти к проекту в WSL
+
+cd /mnt/c/Users/aypir/source/repos/Research
+
+
+4. Передать исходники и задания
+
+scp -i ~/.ssh/id_rsa_hpc \
+  polus/stream.cpp polus/run.py polus/plot.py polus/POLUS_INSTRUCTIONS.txt \
+  edu-cmc-sqi26-11@polus.cs.msu.ru:~/stream-polus/
+
+scp -i ~/.ssh/id_rsa_hpc -r polus/jobs \
+  edu-cmc-sqi26-11@polus.cs.msu.ru:~/stream-polus/
+
+
+5. Подключиться и перейти в папку проекта
+
+ssh -i ~/.ssh/id_rsa_hpc edu-cmc-sqi26-11@polus.cs.msu.ru
+cd ~/stream-polus
+
+
+6. Удалить старые результаты, логи и программу
+
+rm -f build/stream
+rm -f results/*.csv results/*.svg results/*.txt
+rm -f logs/*.out logs/*.err
+
+
+7. Исправить переносы строк Windows и разрешить запуск скриптов
+
+sed -i 's/\r$//' stream.cpp run.py plot.py jobs/*.sh jobs/*.lsf
+chmod +x jobs/*.sh
+mkdir -p build results logs
+
+
+8. При желании ещё раз сохранить топологию вычислительного узла
+
+bsub < jobs/topology.lsf
+bjobs
+
+После статуса DONE информация будет в results/compute_node_info.txt.
+
+
+9. Собрать программу
+
+bsub < jobs/build.lsf
+bjobs
+bjobs -a | head -20
+
+Посмотреть последние логи сборки:
+
+tail -100 $(ls -t logs/build.*.out | head -1)
+cat $(ls -t logs/build.*.err | head -1)
+
+Проверить программу:
+
+ls -lh build/stream
+file build/stream
+
+
+10. Запустить полный тест
+
+bsub < jobs/run_all.lsf
+
+Запомнить номер JOBID, который напечатает bsub.
+
+Проверка состояния:
+
+bjobs
+bjobs -a | head -20
+
+Если задание долго находится в PEND:
+
+bjobs -p
+bjobs -l JOBID
+
+Просмотр выполняющегося задания:
+
+tail -f logs/all.JOBID.out
+
+Выход из tail -f: Ctrl+C. Само задание при этом не остановится.
+
+
+11. Проверить завершившийся прогон
+
+bjobs -a | head -20
+tail -50 logs/all.JOBID.out
+cat logs/all.JOBID.err
+
+Нормальный статус задания: DONE. Файл err должен быть пустым.
+
+Проверить результаты:
+
+ls -lh results
+wc -l results/all_results.csv
+head -5 results/all_results.csv
+
+Для 8 конфигураций, 40 значений N и 4 операций ожидается
+1281 строка вместе с заголовком.
+
+
+12. Дополнительно измерить частоту процессора
+
+bsub < jobs/frequency_check.lsf
+bjobs
+
+После DONE результат будет в results/frequency.txt.
+
+
+13. Выйти с Polus
+
+logout
+
+
+14. Скачать CSV и техническую информацию в WSL
+
+cd /mnt/c/Users/aypir/source/repos/Research
+
+scp -i ~/.ssh/id_rsa_hpc \
+  'edu-cmc-sqi26-11@polus.cs.msu.ru:~/stream-polus/results/*.csv' \
+  polus/results/
+
+scp -i ~/.ssh/id_rsa_hpc \
+  'edu-cmc-sqi26-11@polus.cs.msu.ru:~/stream-polus/results/*.txt' \
+  polus/results/
+
+
+15. Построить графики на Windows в PowerShell
+
+cd C:\Users\aypir\source\repos\Research
+py polus\plot.py
+py plot_polus_comparison.py
+py make_presentation.py
+
+
+КОНФИГУРАЦИИ В ОДНОМ ПОЛНОМ ПРОГОНЕ
+
+1core          - 1 физическое ядро, 1 поток
+2cores         - 2 физических ядра, по 1 потоку
+4cores         - 4 физических ядра, по 1 потоку
+6cores         - 6 физических ядер, по 1 потоку
+8cores         - 8 физических ядер, по 1 потоку
+10cores        - 10 физических ядер одного сокета
+20cores        - 20 физических ядер двух сокетов
+20cores_smt2   - 20 физических ядер, по 2 аппаратных потока, всего 40 потоков
+
+Все задания закреплены за polus-c4, чтобы результаты разных запусков
+не смешивали характеристики разных вычислительных узлов.

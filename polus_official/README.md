@@ -43,3 +43,7 @@ bsub < jobs/run_all.lsf
 
 Итоговый файл находится в `results/all_results.csv`. Графики строятся на
 Windows командой `py -3 polus_official/plot.py` из корня проекта.
+
+Для сборки компилятором IBM XL используется `xlC_r`. Новые результаты
+сохраняются отдельно в `results_xl`, а подробные команды приведены в
+`POLUS_XL_INSTRUCTIONS.txt`.

@@ -1,0 +1,202 @@
+ОФИЦИАЛЬНЫЙ STREAM 5.10: СБОРКА IBM XL И ПОЛНЫЙ ПРОГОН НА POLUS
+
+Исходный stream.c не изменён. Он подключается к stream_runner.cpp, поэтому
+вся программа собирается потокобезопасным C++-драйвером xlC_r. Команда xlc_r
+является C-драйвером и для этой обвязки не подходит.
+
+Локальная папка Windows:
+C:\Users\aypir\source\repos\Research\polus_official
+
+Та же папка в WSL:
+/mnt/c/Users/aypir/source/repos/Research/polus_official
+
+Удалённая папка:
+~/stream-polus-official-xl
+
+
+1. Открыть WSL и проверить доступ
+
+chmod 600 ~/.ssh/id_rsa_hpc
+ssh -i ~/.ssh/id_rsa_hpc edu-cmc-sqi26-11@polus.cs.msu.ru
+
+После успешного входа выйти обратно в WSL:
+
+logout
+
+
+2. Создать отдельную папку на Polus
+
+ssh -i ~/.ssh/id_rsa_hpc edu-cmc-sqi26-11@polus.cs.msu.ru \
+  'mkdir -p ~/stream-polus-official-xl/jobs ~/stream-polus-official-xl/build ~/stream-polus-official-xl/results_xl ~/stream-polus-official-xl/logs'
+
+
+3. Перейти в корень локального проекта
+
+cd /mnt/c/Users/aypir/source/repos/Research
+
+
+4. Передать исходники
+
+scp -i ~/.ssh/id_rsa_hpc \
+  polus_official/stream.c \
+  polus_official/stream_runner.cpp \
+  polus_official/run.py \
+  polus_official/plot.py \
+  polus_official/README.md \
+  polus_official/POLUS_XL_INSTRUCTIONS.txt \
+  edu-cmc-sqi26-11@polus.cs.msu.ru:~/stream-polus-official-xl/
+
+scp -i ~/.ssh/id_rsa_hpc -r polus_official/jobs \
+  edu-cmc-sqi26-11@polus.cs.msu.ru:~/stream-polus-official-xl/
+
+
+5. Подключиться к Polus и подготовить файлы
+
+ssh -i ~/.ssh/id_rsa_hpc edu-cmc-sqi26-11@polus.cs.msu.ru
+cd ~/stream-polus-official-xl
+
+sed -i 's/\r$//' stream.c stream_runner.cpp run.py plot.py jobs/*.sh jobs/*.lsf
+chmod +x jobs/*.sh
+mkdir -p build results_xl logs
+
+Проверить компилятор:
+
+xlC_r -qversion
+
+Ожидаемая версия на Polus: IBM XL C/C++ 13.1.6.
+
+
+6. Удалить только старые данные этого XL-прогона
+
+rm -f build/stream_official_xl
+rm -f results_xl/*.csv results_xl/*.svg results_xl/*.txt
+rm -f logs/*.out logs/*.err
+
+Старые GCC-результаты из другой папки эта команда не затрагивает.
+
+
+7. Выполнить проверочную сборку на узле c4
+
+bsub < jobs/build.lsf
+
+Проверять состояние:
+
+bjobs
+bjobs -a | head -20
+
+Если задание находится в PEND:
+
+bjobs -p
+bjobs -l JOBID
+
+После статуса DONE посмотреть отчёты:
+
+tail -100 $(ls -t logs/build.*.out | head -1)
+cat $(ls -t logs/build.*.err | head -1)
+
+Проверить программу:
+
+ls -lh build/stream_official_xl
+file build/stream_official_xl
+
+В конце build-лога должны находиться четыре CSV-строки Copy, Scale, Add и
+Triad. В err не должно быть ошибок. Предупреждения о старом стиле исходного
+stream.c допустимы, если задание завершилось со статусом DONE.
+
+Проверочная сборка сразу использует максимальное N = 67 108 864. Поэтому она
+также проверяет, что XL может собрать и запустить три статических массива
+общим объёмом около 1.5 ГиБ.
+
+Фактическая команда имеет вид:
+
+xlC_r -O4 -q64 -qarch=pwr8 -qtune=pwr8 -qsmp=omp \
+  -qlanglvl=extended0x -qmaxmem=-1 \
+  -DSTREAM_ARRAY_SIZE=N stream_runner.cpp -o build/stream_official_xl
+
+
+8. Запустить полный тест
+
+bsub < jobs/run_all.lsf
+
+Запомнить JOBID. Проверять выполнение:
+
+bjobs
+bjobs -a | head -20
+
+Смотреть текущий вывод:
+
+tail -f logs/all.JOBID.out
+
+Выйти из tail можно сочетанием Ctrl+C. Само задание продолжит работать.
+
+Проверяются конфигурации:
+1core, 2cores, 4cores, 6cores, 8cores, 10cores, 20cores, 20cores_smt2.
+
+Для каждой конфигурации используются 40 размеров N и четыре ядра STREAM.
+Каждая операция измеряется не менее двух секунд. Ориентировочная длительность
+полного задания после начала выполнения составляет 45–60 минут.
+
+
+9. Проверить завершившееся задание
+
+bjobs -a | head -20
+tail -50 logs/all.JOBID.out
+cat logs/all.JOBID.err
+
+Нормальный статус: DONE. Файл err должен быть пустым.
+
+Проверить результаты:
+
+ls -lh results_xl
+wc -l results_xl/all_results.csv
+head -5 results_xl/all_results.csv
+
+Ожидается 1281 строка: заголовок и 1280 результатов.
+В столбце compiler должно быть IBM_XL_C++.
+
+
+10. Выйти с Polus и скачать CSV
+
+logout
+
+В WSL:
+
+cd /mnt/c/Users/aypir/source/repos/Research
+mkdir -p polus_official/results_xl
+
+scp -i ~/.ssh/id_rsa_hpc \
+  'edu-cmc-sqi26-11@polus.cs.msu.ru:~/stream-polus-official-xl/results_xl/*.csv' \
+  polus_official/results_xl/
+
+
+11. Построить графики и сравнение с моей XL-версией
+
+В PowerShell:
+
+cd C:\Users\aypir\source\repos\Research
+
+py polus_official\plot.py \
+  polus_official\results_xl \
+  polus\results_xl\all_results.csv
+
+В папке polus_official\results_xl появятся:
+
+all_results.svg
+single_core.svg
+ram_scaling.svg
+single_core_comparison.svg
+
+
+12. Что именно изменено относительно GCC-сборки
+
+g++               заменён на xlC_r.
+-O3               заменён на -O4.
+-fopenmp          заменён на -qsmp=omp.
+-mcpu=power8      заменён на -qarch=pwr8.
+-mtune=power8     заменён на -qtune=pwr8.
+-std=c++11        заменён на -qlanglvl=extended0x.
+-mcmodel=medium   удалён: это специфический флаг GCC.
+
+Добавлен -q64, потому что тест работает с большими массивами в 64-битном
+адресном пространстве. Исходный stream.c и четыре вычислительных ядра STREAM
+не изменены.

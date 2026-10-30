@@ -90,6 +90,15 @@ def add_cache_zones(axis, core, only_l3=False):
                       fontsize=7, color="dimgray")
 
 
+# Показывает одну границу для операции с двумя или тремя массивами.
+def add_operation_cache_limits(axis, core, kernel, color="gray"):
+    use_right = kernel in ("Copy", "Scale")
+    for left, right, label in CACHE_ZONES[core]:
+        position = right if use_right else left
+        axis.axvline(position, color=color, linestyle="--",
+                     linewidth=0.8, alpha=0.45)
+
+
 # Читает CSV из указанной папки результатов.
 def read_csv(folder, name):
     with (folder / name).open(encoding="utf-8") as source:
@@ -260,6 +269,8 @@ def plot_windows_comparison(my_rows, official_rows):
                       [float(row["median_gbps"]) for row in official],
                       color=color, linestyle="--", marker="o", markersize=3,
                       label="STREAM 5.10, {}-ядро".format(core))
+
+            add_operation_cache_limits(axis, core, kernel, color)
 
         axis.set_xscale("log", base=2)
         axis.set_title(kernel)

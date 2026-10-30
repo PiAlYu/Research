@@ -2,6 +2,7 @@
 #BSUB -q short
 #BSUB -W 00:05
 #BSUB -n 20
+#BSUB -m "polus-c4-ib.bmc.hpc.cs.msu.ru"
 #BSUB -R "span[hosts=1]"
 #BSUB -o logs/frequency.%J.out
 #BSUB -e logs/frequency.%J.err

@@ -8,9 +8,7 @@ BUILD = ROOT / "build"
 RESULTS = ROOT / "results"
 SOURCE = ROOT / "stream.cpp"
 PROGRAM = BUILD / "stream.exe"
-VCVARS = Path(
-    "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Auxiliary/Build/vcvars64.bat"
-)
+VCVARS = Path( "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Auxiliary/Build/vcvars64.bat")
 
 PROFILES = [
     ("p1", [2]),
@@ -50,8 +48,7 @@ def build():
 
 # Запускает один тест и читает его четыре строки CSV.
 def benchmark(size, threads, samples, repeats, cpus):
-    mask = sum(1 << cpu for cpu in cpus)
-    command = [PROGRAM, size, threads, samples, repeats, mask]
+    command = [PROGRAM, size, threads, samples, repeats, *cpus]
     result = subprocess.run(list(map(str, command)), capture_output=True,
                             text=True, check=True)
     return list(csv.DictReader(result.stdout.splitlines()))
@@ -76,7 +73,7 @@ def run_tests():
         for size in SIZES:
             number += 1
             print(f"{number}/{total}: {profile}, N = {size}", flush=True)
-            repeats = max(1, 800_000_000 // (24 * size))
+            repeats = max(1, 12_000_000_000 // (24 * size))
             for row in benchmark(size, len(cpus), 7, repeats, cpus):
                 all_rows.append({
                     "profile": profile,

@@ -11,10 +11,10 @@ ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build"
 RESULTS = ROOT / "results"
 SOURCE = ROOT / "stream.cpp"
-PROGRAM = BUILD / "stream"
+PROGRAM = BUILD / "stream_xl"
 
 CSV_FIELDS = [
-    "machine", "profile", "cpu_ids", "n", "one_array_kib",
+    "machine", "compiler", "profile", "cpu_ids", "n", "one_array_kib",
     "three_arrays_kib", "one_array_mib", "three_arrays_gib", "kernel",
     "threads", "bytes_per_element", "repeats", "samples", "processed_gb",
     "measurement_seconds", "median_seconds", "best_seconds",
@@ -34,6 +34,10 @@ SIZES = CACHE_SIZES + [RAM_SIZE]
 
 PROFILES = [
     ("1core", [0]),
+    ("2cores", [0, 8]),
+    ("4cores", [0, 8, 16, 24]),
+    ("6cores", [0, 8, 16, 24, 32, 40]),
+    ("8cores", [0, 8, 16, 24, 32, 40, 48, 56]),
     ("10cores", [0, 8, 16, 24, 32, 40, 48, 56, 64, 72]),
     ("20cores", [
         0, 8, 16, 24, 32, 40, 48, 56, 64, 72,
@@ -53,10 +57,11 @@ def build():
     if not BUILD.exists():
         BUILD.mkdir()
     command = [
-        "g++", "-O3", "-fopenmp", "-std=c++11",
-        "-mcpu=power8", "-mtune=power8",
+        "xlC_r", "-O4", "-qarch=pwr8", "-qtune=pwr8",
+        "-qsmp=omp", "-qlanglvl=extended0x", "-qmaxmem=-1",
         str(SOURCE), "-o", str(PROGRAM),
     ]
+    print("Command: {}".format(" ".join(command)))
     subprocess.check_call(command, cwd=str(ROOT))
 
 
@@ -101,6 +106,7 @@ def run_all():
             for row in benchmark(size, cpus, 7, repeats):
                 result_row = {
                     "machine": "Polus_POWER8",
+                    "compiler": "IBM_XL_C++",
                     "profile": profile,
                     "cpu_ids": " ".join(map(str, cpus)),
                     "n": size,
