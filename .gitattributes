@@ -1,0 +1,5 @@
+/polus/lsf/*.lsf text eol=lf
+/polus/lsf/*.sh text eol=lf
+/polus/data/** -text -whitespace
+/polus/reference/official/data/** -text -whitespace
+/polus/graphs/** -whitespace

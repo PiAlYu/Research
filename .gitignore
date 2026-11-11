@@ -5,3 +5,6 @@ logs/
 *_before_outlier_correction.csv
 *_measured.csv
 _check_*.png
+polus/data/campaigns/
+polus/lsf/*.out
+polus/lsf/*.err

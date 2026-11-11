@@ -1,156 +1,171 @@
-from __future__ import print_function
-
+import argparse
 import csv
+import datetime
+import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 
+from profiles import PROFILES
 
 ROOT = Path(__file__).resolve().parent
-BUILD = ROOT / "build"
-RESULTS = ROOT / "results"
 SOURCE = ROOT / "stream.cpp"
-PROGRAM = BUILD / "stream_xl"
+JOB = os.environ.get("LSB_JOBID", datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
+RESULTS = ROOT / "data" / "campaigns" / "run_{}".format(JOB)
+BUILD = RESULTS / "compilation"
+PROGRAM = BUILD / "stream"
+COMPILER = "gcc"
+COMPILER_LABEL = ""
 
-CSV_FIELDS = [
-    "machine", "compiler", "profile", "cpu_ids", "n", "one_array_kib",
-    "three_arrays_kib", "one_array_mib", "three_arrays_gib", "kernel",
-    "threads", "bytes_per_element", "repeats", "samples", "processed_gb",
-    "measurement_seconds", "median_seconds", "best_seconds",
-    "median_gbps", "best_gbps",
-]
-
-CACHE_SIZES = [
-    256, 384, 512, 768, 1024, 1536, 2048, 2730, 3072, 4096, 5461,
-    8192, 12288, 16384, 21845, 24576, 32768, 40960, 49152, 54613,
-    65536, 81920, 87381, 98304, 131072, 196608, 262144, 393216,
-    524288, 699050, 786432, 1048576, 1572864, 2097152, 3145728,
-    4194304, 8388608, 16777216, 33554432,
-]
-
+SIZES = [256, 384, 512, 768, 1024, 1536, 2048, 2730, 3072, 4096,
+         5461, 8192, 12288, 16384, 21845, 24576, 32768, 40960,
+         49152, 54613, 65536, 81920, 87381, 98304, 131072, 196608,
+         262144, 393216, 524288, 699050, 786432, 1048576, 1572864,
+         2097152, 3145728, 4194304, 8388608, 16777216, 33554432, 67108864]
 RAM_SIZE = 67108864
-SIZES = CACHE_SIZES + [RAM_SIZE]
-
-PROFILES = [
-    ("1core", [0]),
-    ("2cores", [0, 8]),
-    ("4cores", [0, 8, 16, 24]),
-    ("6cores", [0, 8, 16, 24, 32, 40]),
-    ("8cores", [0, 8, 16, 24, 32, 40, 48, 56]),
-    ("10cores", [0, 8, 16, 24, 32, 40, 48, 56, 64, 72]),
-    ("20cores", [
-        0, 8, 16, 24, 32, 40, 48, 56, 64, 72,
-        80, 88, 96, 104, 112, 120, 128, 136, 144, 152,
-    ]),
-    ("20cores_smt2", [
-        0, 1, 8, 9, 16, 17, 24, 25, 32, 33,
-        40, 41, 48, 49, 56, 57, 64, 65, 72, 73,
-        80, 81, 88, 89, 96, 97, 104, 105, 112, 113,
-        120, 121, 128, 129, 136, 137, 144, 145, 152, 153,
-    ]),
-]
+RUNS = 3
+MEMORIES = ["local", "interleave"]
+PASSES = ["plain", "core", "cache"]
+EVENTS = {
+    "core": ["task-clock", "cycles", "instructions", "branches", "branch-misses",
+             "context-switches", "cpu-migrations", "page-faults"],
+    "cache": ["task-clock", "cycles", "cache-references", "cache-misses"],
+}
+META = ["stage", "compiler", "implementation", "memory", "run", "profile",
+        "cores", "threads", "socket0_cores", "socket1_cores", "cpu_ids", "n",
+        "socket0_threads", "socket1_threads", "configuration", "pass", "case", "build_id"]
+CSV_FIELDS = META + ["machine", "one_array_kib", "three_arrays_kib", "one_array_mib",
+    "three_arrays_gib", "kernel", "bytes_per_element", "repeats", "samples",
+    "processed_gb", "measurement_seconds", "median_seconds", "best_seconds",
+    "median_gbps", "best_gbps"]
+COUNTER_FIELDS = META + ["event", "value", "unit", "running_percent", "per_gb", "processed_gb"]
 
 
-# Собирает программу.
 def build():
-    if not BUILD.exists():
-        BUILD.mkdir()
-    command = [
-        "xlC_r", "-O4", "-qarch=pwr8", "-qtune=pwr8",
-        "-qsmp=omp", "-qlanglvl=extended0x", "-qmaxmem=-1",
-        str(SOURCE), "-o", str(PROGRAM),
-    ]
-    print("Command: {}".format(" ".join(command)))
-    subprocess.check_call(command, cwd=str(ROOT))
+    global COMPILER_LABEL
+    os.makedirs(str(BUILD), exist_ok=True)
+    if COMPILER == "gcc":
+        command = ["g++", "-O3", "-fopenmp", "-std=c++11", "-mcpu=power8",
+                   "-mtune=power8", "-mcmodel=medium"]
+        report = ["-S", "-fverbose-asm", "-fopt-info-vec-all=" + str(BUILD / "vectorization.log")]
+        version = ["g++", "--version"]
+        version_number = subprocess.check_output(["g++", "-dumpfullversion", "-dumpversion"],
+                                                 universal_newlines=True).strip()
+        COMPILER_LABEL = "GCC_" + version_number
+    else:
+        command = ["xlC_r", "-O4", "-q64", "-qarch=pwr8", "-qtune=pwr8",
+                   "-qsmp=omp", "-qlanglvl=extended0x", "-qmaxmem=-1"]
+        report = ["-S", "-qlist", "-qreport"]
+        version = ["xlC_r", "-qversion"]
+        COMPILER_LABEL = "IBM_XL_C++"
+
+    print("Сборка моей программы:", " ".join(command), flush=True)
+    subprocess.check_call(command + [str(SOURCE), "-o", str(PROGRAM)], cwd=str(ROOT))
+    with (BUILD / "version.log").open("w") as out:
+        subprocess.call(version, stdout=out, stderr=subprocess.STDOUT)
+    subprocess.call(command + report + [str(SOURCE), "-o", str(BUILD / "compiler.s")],
+                    cwd=str(BUILD), stderr=subprocess.STDOUT)
+    with (BUILD / "disassembly.log").open("w") as out:
+        subprocess.call(["objdump", "-d", "-C", str(PROGRAM)], stdout=out, stderr=subprocess.STDOUT)
 
 
-# Запускает один размер на явно выбранных логических CPU.
-def benchmark(size, cpus, samples, repeats):
-    cpu_text = ",".join(map(str, cpus))
-    command = [str(PROGRAM), str(size), str(len(cpus)), str(samples), str(repeats), cpu_text]
-    result = subprocess.Popen(command, cwd=str(ROOT), stdout=subprocess.PIPE, universal_newlines=True)
-    output = result.communicate()[0]
+def benchmark(size, threads, samples, repeats, cpus, memory="local", case="manual", events=None):
+    command = [PROGRAM, size, threads, samples, repeats, ",".join(map(str, cpus))]
+    if memory == "local":
+        command = ["numactl", "--localalloc"] + command
+    else:
+        command = ["numactl", "--interleave=0,1"] + command
+    raw = RESULTS / "raw" / case
+    if events:
+        command = ["perf", "stat", "-x", ";", "-o", str(raw) + ".perf.csv",
+                   "-e", ",".join(events), "--"] + command
+    # На вычислительном узле может быть Python 3.4.
+    with Path(str(raw) + ".stderr.log").open("w") as err:
+        output = subprocess.check_output(list(map(str, command)), cwd=str(ROOT),
+            stderr=err, universal_newlines=True, env=dict(os.environ, LC_ALL="C"))
+    with Path(str(raw) + ".csv").open("w", encoding="utf-8") as out:
+        out.write(output)
     return list(csv.DictReader(output.splitlines()))
 
 
-# Сохраняет строки в CSV-файл.
-def save_csv(name, rows):
-    if not RESULTS.exists():
-        RESULTS.mkdir()
-    with (RESULTS / name).open("w", newline="", encoding="utf-8") as output:
-        writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, extrasaction="ignore")
+def save_csv(name, rows, fields=CSV_FIELDS):
+    with (RESULTS / name).open("w", newline="", encoding="utf-8") as out:
+        writer = csv.DictWriter(out, fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
 
-# Измеряет все размеры на всех конфигурациях.
-def run_all():
-    for name in ("all_results.csv", "cache_results.csv", "ram_results.csv"):
-        path = RESULTS / name
-        if path.exists():
-            path.unlink()
+def read_perf(case, rows, events):
+    total_gb = sum(float(row["processed_gb"]) for row in rows)
+    counters = []
+    with (RESULTS / "raw" / (case + ".perf.csv")).open() as inp:
+        for parts in csv.reader(inp, delimiter=";"):
+            if len(parts) < 3 or parts[2].strip() not in events:
+                continue
+            value = float(parts[0])
+            counters.append(dict(event=parts[2].strip(), value=value, unit=parts[1].strip(),
+                running_percent=parts[4].strip().rstrip("%"),
+                per_gb=value / total_gb, processed_gb=total_gb))
+    return counters
 
-    for name, cpus in PROFILES:
-        print("{}: {}".format(name, " ".join(map(str, cpus))))
 
-    rows = []
-    total = len(PROFILES) * len(SIZES)
-    number = 0
-
-    for profile, cpus in PROFILES:
+def run_tests():
+    profiles = PROFILES
+    # В LSF одно задание обрабатывает один профиль и передаёт очередь следующему.
+    index = os.environ.get("STREAM_PROFILE_INDEX")
+    if index is not None:
+        profiles = [PROFILES[int(index)]]
+    os.makedirs(str(RESULTS / "raw"))
+    rows, counters = [], []
+    save_csv("measurements.csv", rows)
+    save_csv("counters.csv", counters, COUNTER_FIELDS)
+    for profile, cpus in profiles:
+        left = [cpu for cpu in cpus if cpu < 80]
+        right = [cpu for cpu in cpus if cpu >= 80]
+        cores = len({cpu // 8 for cpu in cpus})
+        if len(cpus) == cores:
+            configuration = "physical"
+        elif len(cpus) == 40:
+            configuration = "smt40"
+        else:
+            configuration = "smt20"
         for size in SIZES:
-            number += 1
-            print("{}/{}: {}, N = {}".format(number, total, profile, size), flush=True)
             repeats = max(1, 800000000 // (24 * size))
-            for row in benchmark(size, cpus, 7, repeats):
-                result_row = {
-                    "machine": "Polus_POWER8",
-                    "compiler": "IBM_XL_C++",
-                    "profile": profile,
-                    "cpu_ids": " ".join(map(str, cpus)),
-                    "n": size,
-                    "one_array_kib": round(8 * size / 1024.0, 3),
-                    "three_arrays_kib": round(24 * size / 1024.0, 3),
-                    "one_array_mib": round(8 * size / 1024.0 ** 2, 3),
-                    "three_arrays_gib": round(24 * size / 1024.0 ** 3, 6),
-                }
-                result_row.update(row)
-                rows.append(result_row)
-            save_csv("all_results.csv", rows)
-
-    cache_rows = [row for row in rows if row["profile"] == "1core" and int(row["n"]) in CACHE_SIZES]
-    ram_rows = [row for row in rows if int(row["n"]) == RAM_SIZE]
-    save_csv("cache_results.csv", cache_rows)
-    save_csv("ram_results.csv", ram_rows)
-
-
-# Замеряет среднюю частоту для всех конфигураций через perf stat.
-def frequency():
-    if not RESULTS.exists():
-        RESULTS.mkdir()
-    with (RESULTS / "frequency.txt").open("w") as output:
-        with open(os.devnull, "w") as null:
-            for name, cpus in PROFILES:
-                output.write("\n{}: {}\n".format(name, " ".join(map(str, cpus))))
-                output.flush()
-                cpu_text = ",".join(map(str, cpus))
-                command = [
-                    "perf", "stat", "-e", "task-clock,cycles,instructions",
-                    str(PROGRAM), "131072", str(len(cpus)), "7", "254", cpu_text,
-                ]
-                subprocess.call(command, cwd=str(ROOT), stdout=null, stderr=output)
-
-
-def main():
-    command = sys.argv[1] if len(sys.argv) > 1 else ""
-    if command == "build":
-        build()
-    if command == "all":
-        run_all()
-    if command == "frequency":
-        frequency()
+            for memory in MEMORIES:
+                for run in range(1, RUNS + 1):
+                    for pass_name in PASSES:
+                        case = "own_n{}_r{}_{}_{}_{}".format(size, run, profile, memory, pass_name)
+                        print("{}, N={}, {}, повтор={}, {}".format(profile, size, memory, run, pass_name), flush=True)
+                        events = EVENTS.get(pass_name)
+                        speeds = benchmark(size, len(cpus), 7, repeats, cpus, memory, case, events)
+                        counted = read_perf(case, speeds, events) if events else []
+                        meta = dict(profile=profile, cpu_ids=",".join(map(str, cpus)),
+                            cores=cores, threads=len(cpus), socket0_cores=len({c // 8 for c in left}),
+                            socket1_cores=len({c // 8 for c in right}), socket0_threads=len(left),
+                            socket1_threads=len(right), configuration=configuration,
+                            compiler=COMPILER_LABEL, stage="ram" if size == RAM_SIZE else "sweep",
+                            implementation="own", memory=memory, run=run, n=size,
+                            case=case, build_id="own_runtime_N")
+                        meta["pass"] = pass_name
+                        for row in speeds + counted:
+                            row.update(meta)
+                        for row in speeds:
+                            row.update(machine="Polus_POWER8", one_array_kib=round(8 * size / 1024, 3),
+                                three_arrays_kib=round(24 * size / 1024, 3),
+                                one_array_mib=round(8 * size / 1024 ** 2, 3),
+                                three_arrays_gib=round(24 * size / 1024 ** 3, 6))
+                        rows.extend(speeds)
+                        counters.extend(counted)
+                        save_csv("measurements.csv", rows)
+                        save_csv("counters.csv", counters, COUNTER_FIELDS)
+    info = dict(stage="all", job_id=JOB, compiler=COMPILER_LABEL, status="complete")
+    with (RESULTS / "manifest.json").open("w", encoding="utf-8") as out:
+        json.dump(info, out)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Полный прогон STREAM на Полюсе")
+    parser.add_argument("--compiler", choices=["gcc", "xl"], default="gcc")
+    COMPILER = parser.parse_args().compiler
+    build()
+    run_tests()

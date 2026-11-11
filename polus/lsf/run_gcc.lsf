@@ -1,0 +1,22 @@
+#!/bin/bash
+#BSUB -J run_gcc
+#BSUB -q normal
+#BSUB -W 03:00
+#BSUB -n 20
+#BSUB -m "polus-c4-ib.bmc.hpc.cs.msu.ru"
+#BSUB -R "span[hosts=1]"
+#BSUB -x
+#BSUB -o lsf/run_gcc.%J.out
+#BSUB -e lsf/run_gcc.%J.err
+
+set -e
+export PYTHONIOENCODING=utf-8
+cd "$LS_SUBCWD"
+source lsf/enable_gcc.sh
+export STREAM_PROFILE_INDEX=${STREAM_PROFILE_INDEX:-0}
+python3 run.py
+
+if [ "$STREAM_PROFILE_INDEX" -lt 48 ]; then
+    export STREAM_PROFILE_INDEX=$((STREAM_PROFILE_INDEX + 1))
+    bsub < lsf/run_gcc.lsf
+fi
