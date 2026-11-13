@@ -34,8 +34,7 @@ EVENTS = {
 META = ["stage", "compiler", "implementation", "memory", "run", "profile",
         "cores", "threads", "socket0_cores", "socket1_cores", "cpu_ids", "n",
         "socket0_threads", "socket1_threads", "configuration", "pass", "case", "build_id"]
-CSV_FIELDS = META + ["machine", "one_array_kib", "three_arrays_kib", "one_array_mib",
-    "three_arrays_gib", "kernel", "bytes_per_element", "repeats", "samples",
+CSV_FIELDS = META + ["kernel", "bytes_per_element", "repeats", "samples",
     "processed_gb", "measurement_seconds", "median_seconds", "best_seconds",
     "median_gbps", "best_gbps"]
 COUNTER_FIELDS = META + ["event", "value", "unit", "running_percent", "per_gb", "processed_gb"]
@@ -116,12 +115,13 @@ def run_tests():
     if index is not None:
         profiles = [PROFILES[int(index)]]
     os.makedirs(str(RESULTS / "raw"))
-    rows, counters = [], []
-    save_csv("measurements.csv", rows)
+    measurements = []
+    counters = []
+    save_csv("measurements.csv", measurements)
     save_csv("counters.csv", counters, COUNTER_FIELDS)
     for profile, cpus in profiles:
-        left = [cpu for cpu in cpus if cpu < 80]
-        right = [cpu for cpu in cpus if cpu >= 80]
+        socket0_cpus = [cpu for cpu in cpus if cpu < 80]
+        socket1_cpus = [cpu for cpu in cpus if cpu >= 80]
         cores = len({cpu // 8 for cpu in cpus})
         if len(cpus) == cores:
             configuration = "physical"
@@ -137,26 +137,38 @@ def run_tests():
                         case = "own_n{}_r{}_{}_{}_{}".format(size, run, profile, memory, pass_name)
                         print("{}, N={}, {}, повтор={}, {}".format(profile, size, memory, run, pass_name), flush=True)
                         events = EVENTS.get(pass_name)
-                        speeds = benchmark(size, len(cpus), 7, repeats, cpus, memory, case, events)
-                        counted = read_perf(case, speeds, events) if events else []
-                        meta = dict(profile=profile, cpu_ids=",".join(map(str, cpus)),
-                            cores=cores, threads=len(cpus), socket0_cores=len({c // 8 for c in left}),
-                            socket1_cores=len({c // 8 for c in right}), socket0_threads=len(left),
-                            socket1_threads=len(right), configuration=configuration,
-                            compiler=COMPILER_LABEL, stage="ram" if size == RAM_SIZE else "sweep",
-                            implementation="own", memory=memory, run=run, n=size,
-                            case=case, build_id="own_runtime_N")
-                        meta["pass"] = pass_name
-                        for row in speeds + counted:
-                            row.update(meta)
-                        for row in speeds:
-                            row.update(machine="Polus_POWER8", one_array_kib=round(8 * size / 1024, 3),
-                                three_arrays_kib=round(24 * size / 1024, 3),
-                                one_array_mib=round(8 * size / 1024 ** 2, 3),
-                                three_arrays_gib=round(24 * size / 1024 ** 3, 6))
-                        rows.extend(speeds)
-                        counters.extend(counted)
-                        save_csv("measurements.csv", rows)
+                        speed_rows = benchmark(size, len(cpus), 7, repeats, cpus, memory, case, events)
+                        counter_rows = read_perf(case, speed_rows, events) if events else []
+
+                        # Условия запуска, которые добавляем к каждой строке CSV.
+                        run_info = {
+                            "profile": profile,
+                            "cpu_ids": ",".join(map(str, cpus)),
+                            "cores": cores,
+                            "threads": len(cpus),
+                            "socket0_cores": len({c // 8 for c in socket0_cpus}),
+                            "socket1_cores": len({c // 8 for c in socket1_cpus}),
+                            "socket0_threads": len(socket0_cpus),
+                            "socket1_threads": len(socket1_cpus),
+                            "configuration": configuration,
+                            "compiler": COMPILER_LABEL,
+                            "stage": "ram" if size == RAM_SIZE else "sweep",
+                            "implementation": "own",
+                            "memory": memory,
+                            "run": run,
+                            "n": size,
+                            "case": case,
+                            "build_id": "own_runtime_N",
+                            "pass": pass_name,
+                        }
+                        for row in speed_rows:
+                            row.update(run_info)
+                            measurements.append(row)
+                        for row in counter_rows:
+                            row.update(run_info)
+                            counters.append(row)
+
+                        save_csv("measurements.csv", measurements)
                         save_csv("counters.csv", counters, COUNTER_FIELDS)
     info = dict(stage="all", job_id=JOB, compiler=COMPILER_LABEL, status="complete")
     with (RESULTS / "manifest.json").open("w", encoding="utf-8") as out:
@@ -164,7 +176,7 @@ def run_tests():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Полный прогон STREAM на Полюсе")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", choices=["gcc", "xl"], default="gcc")
     COMPILER = parser.parse_args().compiler
     build()

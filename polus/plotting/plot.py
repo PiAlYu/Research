@@ -142,7 +142,6 @@ def main():
     def save(fig, name):
         path = graphs / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(path) + ".svg", bbox_inches="tight", metadata={"Date": None})
         fig.savefig(str(path) + ".png", dpi=150, bbox_inches="tight")
         plt.close(fig)
 

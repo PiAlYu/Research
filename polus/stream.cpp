@@ -24,6 +24,8 @@ void compiler_barrier() {
 }
 
 const double TARGET_SECONDS = 2.0;
+const int CACHE_LINE_BYTES = 128;
+const int ELEMENTS_PER_BLOCK = CACHE_LINE_BYTES / sizeof(double);
 std::vector<int> thread_cpus;
 
 // Закрепляет текущий поток за выбранным логическим процессором.
@@ -84,9 +86,9 @@ void stream_kernel(int kernel, double* a, double* b, double* c, long long n, int
         bind_thread();
         int thread = omp_get_thread_num();
         int threads = omp_get_num_threads();
-        long long blocks = (n + 15) / 16;
-        long long begin = std::min(n, blocks * thread / threads * 16);
-        long long end = std::min(n, blocks * (thread + 1) / threads * 16);
+        long long blocks = (n + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK;
+        long long begin = std::min(n, blocks * thread / threads * ELEMENTS_PER_BLOCK);
+        long long end = std::min(n, blocks * (thread + 1) / threads * ELEMENTS_PER_BLOCK);
         long long count = end - begin;
 
         if (kernel == 0) copy_kernel(a + begin, c + begin, count, repeats);
@@ -144,18 +146,18 @@ int main(int argc, char* argv[]) {
     double* a;
     double* b;
     double* c;
-    posix_memalign((void**)&a, 128, n * sizeof(double));
-    posix_memalign((void**)&b, 128, n * sizeof(double));
-    posix_memalign((void**)&c, 128, n * sizeof(double));
+    posix_memalign((void**)&a, CACHE_LINE_BYTES, n * sizeof(double));
+    posix_memalign((void**)&b, CACHE_LINE_BYTES, n * sizeof(double));
+    posix_memalign((void**)&c, CACHE_LINE_BYTES, n * sizeof(double));
 
 #pragma omp parallel
     {
         bind_thread();
         int thread = omp_get_thread_num();
         int threads = omp_get_num_threads();
-        long long blocks = (n + 15) / 16;
-        long long begin = std::min(n, blocks * thread / threads * 16);
-        long long end = std::min(n, blocks * (thread + 1) / threads * 16);
+        long long blocks = (n + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK;
+        long long begin = std::min(n, blocks * thread / threads * ELEMENTS_PER_BLOCK);
+        long long end = std::min(n, blocks * (thread + 1) / threads * ELEMENTS_PER_BLOCK);
         for (long long i = begin; i < end; i++) {
             a[i] = 1.0;
             b[i] = 2.0;
